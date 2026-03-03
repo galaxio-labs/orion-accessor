@@ -1,7 +1,7 @@
 use crate::prelude::*;
 use std::{path::PathBuf, rc::Rc};
 
-use orion_conf::Yamlable;
+use orion_conf::YamlIO;
 
 use crate::{
     addr::{

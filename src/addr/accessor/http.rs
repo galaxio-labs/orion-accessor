@@ -12,7 +12,7 @@ use bytes::Bytes;
 use futures_core::stream::Stream;
 use getset::{Getters, WithSetters};
 use http_body::{Frame, SizeHint};
-use orion_error::{ContextRecord, ToStructError, UvsResFrom};
+use orion_error::{ContextRecord, ToStructError, UvsFrom};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -180,9 +180,9 @@ impl HttpAccessor {
                 request
             }
             _ => {
-                return Err(
-                    AddrReason::from_res(format!("Unsupported HTTP method: {method}")).to_err(),
-                );
+                return Err(AddrReason::from_res()
+                    .to_err()
+                    .want(format!("Unsupported HTTP method: {method}")));
             }
         };
 
@@ -252,11 +252,9 @@ impl HttpAccessor {
         let mut response = request.send().await.owe_res().with(&ctx)?;
 
         if !response.status().is_success() {
-            return Err(AddrReason::from_res(format!(
-                "HTTP request failed: {}",
-                response.status()
-            ))
-            .to_err())
+            return Err(AddrReason::from_res()
+                .to_err()
+                .want(format!("HTTP request failed: {}", response.status())))
             .with(&ctx);
         }
 
@@ -350,7 +348,7 @@ impl ResourceUploader for HttpAccessor {
         options: &UploadOptions,
     ) -> AddrResult<UpdateUnit> {
         if !path.exists() {
-            return Err(AddrReason::from_res("path not exist").to_err());
+            return Err(AddrReason::from_res().to_err().want("path not exist"));
         }
         match addr {
             Address::Http(http) => {

@@ -4,7 +4,7 @@ use crate::types::ResourceDownloader;
 use crate::update::{DownloadOptions, UploadOptions};
 use contracts::debug_requires;
 use fs_extra::dir::CopyOptions;
-use orion_error::{ContextRecord, ToStructError, UvsResFrom};
+use orion_error::{ContextRecord, ToStructError, UvsFrom};
 
 use crate::types::ResourceUploader;
 
@@ -79,7 +79,7 @@ impl ResourceUploader for LocalAccessor {
             _ => return Err(AddrReason::Brief(format!("addr type error {addr}")).to_err()),
         };
         if !path.exists() {
-            return Err(AddrReason::from_res("path not exist").to_err());
+            return Err(AddrReason::from_res().to_err().want("path not exist"));
         }
         if path.is_file() {
             let file_name = path
@@ -102,7 +102,7 @@ pub fn path_file_name(path: &Path) -> AddrResult<String> {
     let file_name = path
         .file_name()
         .and_then(|f| f.to_str())
-        .ok_or(AddrReason::from_conf("get file_name error".to_string()).to_err())?;
+        .ok_or(AddrReason::from_conf().to_err().want("get file_name error"))?;
     Ok(file_name.to_string())
 }
 #[debug_requires(local.exists(), "local need exists")]
@@ -113,7 +113,7 @@ pub fn rename_path(local: &Path, name: &str) -> AddrResult<PathBuf> {
     let dst_path = local
         .parent()
         .map(|x| x.join(name))
-        .ok_or(AddrReason::from_conf("bad path".to_string()).to_err())?;
+        .ok_or(AddrReason::from_conf().to_err().want("bad path"))?;
 
     let _dst_copy = dst_path.clone();
     if dst_path.exists() {

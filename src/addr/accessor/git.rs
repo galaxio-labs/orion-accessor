@@ -15,7 +15,7 @@ use git2::{
     build::{CheckoutBuilder, RepoBuilder},
 };
 use home::home_dir;
-use orion_error::{ContextRecord, ToStructError, UvsBizFrom, UvsDataFrom, UvsResFrom};
+use orion_error::{ContextRecord, ToStructError, UvsFrom};
 
 use orion_infra::path::ensure_path;
 
@@ -128,7 +128,7 @@ impl GitAccessor {
     /// 更新现有仓库
     fn update_repo(&self, addr: &GitRepository, repo: &Repository) -> AddrResult<()> {
         if !self.is_workdir_clean(repo)? {
-            return Err(AddrReason::from_biz("工作区有未提交的更改").to_err());
+            return Err(AddrReason::from_biz().to_err().want("工作区有未提交的更改"));
         }
         // 1. 获取远程更新
         self.fetch_updates(addr, repo)?;
@@ -203,7 +203,7 @@ impl GitAccessor {
         // 获取当前分支名称
         let refname = match repo.head().owe_data()?.name() {
             Some(name) => name.to_string(),
-            None => return AddrReason::from_biz("无法获取分支名称").err_result(),
+            None => return AddrReason::from_biz().err_result().want("无法获取分支名称"),
         };
 
         // 更新引用到上游提交
@@ -234,7 +234,9 @@ impl GitAccessor {
 
         // 检查合并状态
         if repo.index().owe_data().want("repo index")?.has_conflicts() {
-            return AddrReason::from_biz("合并冲突：需要手动解决").err_result();
+            return AddrReason::from_biz()
+                .err_result()
+                .want("合并冲突：需要手动解决");
         }
 
         // 创建合并提交
@@ -309,7 +311,7 @@ impl ResourceDownloader for GitAccessor {
         };
         let name = self.get_local_repo_name(addr);
         let cache_local = home_dir()
-            .ok_or(AddrReason::from_res("unget home").to_err())?
+            .ok_or(AddrReason::from_res().to_err().want("unget home"))?
             .join(".cache/galaxy");
         ensure_path(&cache_local).owe_logic().with(&ctx)?;
         let mut git_local = cache_local.join(name.clone());
@@ -378,7 +380,7 @@ impl ResourceUploader for GitAccessor {
         ctx.record("target", path.display().to_string());
 
         if !path.exists() {
-            return Err(AddrReason::from_res("path not exist").to_err());
+            return Err(AddrReason::from_res().to_err().want("path not exist"));
         }
         let temp_path = home_dir().unwrap_or(PathBuf::from("~/")).join(".temp");
         ensure_path(&temp_path).owe_logic()?;
@@ -528,7 +530,7 @@ impl GitAccessor {
             let head = repo.head().owe_data()?;
             let _name = head
                 .name()
-                .ok_or_else(|| AddrReason::from_data("无法获取 HEAD 名称", None).to_err())?;
+                .ok_or_else(|| AddrReason::from_data().to_err().want("无法获取 HEAD 名称"))?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
                 .owe_data()?;
             Ok(())
@@ -576,7 +578,7 @@ impl GitAccessor {
             let refname = b
                 .get()
                 .name()
-                .ok_or_else(|| AddrReason::from_biz("无效的分支名称").to_err())?;
+                .ok_or_else(|| AddrReason::from_biz().to_err().want("无效的分支名称"))?;
             repo.set_head(refname).owe_data()?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
                 .owe_data()?;
@@ -601,7 +603,9 @@ impl GitAccessor {
             return Ok(());
         }
 
-        AddrReason::from_biz(format!("分支 '{branch}' 不存在")).err_result()
+        AddrReason::from_biz()
+            .err_result()
+            .want(format!("分支 '{branch}' 不存在"))
     }
 }
 

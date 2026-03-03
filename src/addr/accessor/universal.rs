@@ -4,7 +4,7 @@ use crate::prelude::*;
 use crate::types::{ResourceDownloader, ResourceUploader, UpdateUnit};
 use crate::update::{DownloadOptions, UploadOptions};
 use log::error;
-use orion_conf::Yamlable;
+use orion_conf::YamlIO;
 use std::path::{Path, PathBuf};
 
 use super::git::GitAccessor;
