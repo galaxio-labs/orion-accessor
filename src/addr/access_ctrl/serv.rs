@@ -115,7 +115,9 @@ impl TryFrom<&PathBuf> for NetAccessCtrl {
     type Error = AddrError;
 
     fn try_from(value: &PathBuf) -> Result<Self, Self::Error> {
-        NetAccessCtrl::load_yaml(value).owe_res().with_context(value)
+        NetAccessCtrl::load_yaml(value)
+            .owe_res()
+            .with_context(value)
     }
 }
 

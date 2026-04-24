@@ -4,8 +4,8 @@ use crate::types::ResourceDownloader;
 use crate::update::{DownloadOptions, UploadOptions};
 use contracts::debug_requires;
 use fs_extra::dir::CopyOptions;
-use orion_error::traits_ext::{ContextRecord, ToStructError};
 use orion_error::UvsFrom;
+use orion_error::traits_ext::{ContextRecord, ToStructError};
 
 use crate::types::ResourceUploader;
 
@@ -100,10 +100,11 @@ impl ResourceUploader for LocalAccessor {
 }
 
 pub fn path_file_name(path: &Path) -> AddrResult<String> {
-    let file_name = path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .ok_or(AddrReason::from_conf().to_err().doing("get file_name error"))?;
+    let file_name = path.file_name().and_then(|f| f.to_str()).ok_or(
+        AddrReason::from_conf()
+            .to_err()
+            .doing("get file_name error"),
+    )?;
     Ok(file_name.to_string())
 }
 #[debug_requires(local.exists(), "local need exists")]
@@ -135,7 +136,9 @@ pub fn rename_path(local: &Path, name: &str) -> AddrResult<PathBuf> {
         }
     }
     ctx.record("new path", dst_path.display().to_string());
-    std::fs::rename(local, &dst_path).owe_conf().with_context(&ctx)?;
+    std::fs::rename(local, &dst_path)
+        .owe_conf()
+        .with_context(&ctx)?;
     ctx.mark_suc();
     Ok(dst_path)
 }

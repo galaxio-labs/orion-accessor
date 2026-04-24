@@ -2,10 +2,11 @@ use crate::prelude::*;
 use std::str::FromStr;
 
 /// HTTP methods supported for upload operations
-#[derive(Debug, Clone, PartialEq, derive_more::Display)]
+#[derive(Debug, Clone, PartialEq, Default, derive_more::Display)]
 pub enum HttpMethod {
     #[display("PUT")]
     /// PUT request for binary upload
+    #[default]
     Put,
     #[display("POST")]
     /// POST request for form-data upload
@@ -13,12 +14,6 @@ pub enum HttpMethod {
     #[display("PATCH")]
     /// PATCH request for partial updates
     Patch,
-}
-
-impl Default for HttpMethod {
-    fn default() -> Self {
-        Self::Put
-    }
 }
 
 /// 转换错误类型

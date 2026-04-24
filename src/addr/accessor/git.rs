@@ -15,8 +15,8 @@ use git2::{
     build::{CheckoutBuilder, RepoBuilder},
 };
 use home::home_dir;
-use orion_error::traits_ext::{ContextRecord, ToStructError};
 use orion_error::UvsFrom;
+use orion_error::traits_ext::{ContextRecord, ToStructError};
 
 use orion_infra::path::ensure_path;
 
@@ -129,7 +129,9 @@ impl GitAccessor {
     /// 更新现有仓库
     fn update_repo(&self, addr: &GitRepository, repo: &Repository) -> AddrResult<()> {
         if !self.is_workdir_clean(repo)? {
-            return Err(AddrReason::from_biz().to_err().doing("工作区有未提交的更改"));
+            return Err(AddrReason::from_biz()
+                .to_err()
+                .doing("工作区有未提交的更改"));
         }
         // 1. 获取远程更新
         self.fetch_updates(addr, repo)?;
@@ -204,7 +206,11 @@ impl GitAccessor {
         // 获取当前分支名称
         let refname = match repo.head().owe_data()?.name() {
             Some(name) => name.to_string(),
-            None => return AddrReason::from_biz().err_result().doing("无法获取分支名称"),
+            None => {
+                return AddrReason::from_biz()
+                    .err_result()
+                    .doing("无法获取分支名称");
+            }
         };
 
         // 更新引用到上游提交
@@ -321,8 +327,12 @@ impl ResourceDownloader for GitAccessor {
         ctx.record("path", &git_local);
         debug!( target : "addr/git", "update options {:?} where :{} ", options, git_local.display() );
         if git_local.exists() && options.clean_git_cache() {
-            std::fs::remove_dir_all(&git_local).owe_logic().with_context(&ctx)?;
-            std::fs::create_dir_all(&git_local).owe_logic().with_context(&ctx)?;
+            std::fs::remove_dir_all(&git_local)
+                .owe_logic()
+                .with_context(&ctx)?;
+            std::fs::create_dir_all(&git_local)
+                .owe_logic()
+                .with_context(&ctx)?;
 
             ctx.warn("remove cache ");
         } else {
@@ -337,7 +347,9 @@ impl ResourceDownloader for GitAccessor {
             }
             Err(_) => {
                 debug!(target :"spec", "clone repo : {}", git_local.display());
-                self.clone_repo(addr, &git_local).owe_data().with_context(&ctx)?;
+                self.clone_repo(addr, &git_local)
+                    .owe_data()
+                    .with_context(&ctx)?;
             }
         }
         let mut real_path = path.to_path_buf();
@@ -350,10 +362,14 @@ impl ResourceDownloader for GitAccessor {
             real_path = real_path.join(name);
         }
         if real_path.exists() {
-            std::fs::remove_dir_all(&real_path).owe_res().with_context(&ctx)?;
+            std::fs::remove_dir_all(&real_path)
+                .owe_res()
+                .with_context(&ctx)?;
         }
 
-        std::fs::create_dir_all(&real_path).owe_res().with_context(&ctx)?;
+        std::fs::create_dir_all(&real_path)
+            .owe_res()
+            .with_context(&ctx)?;
         let options = CopyOptions::new();
         debug!(target:"spec", "src-path:{}", git_local.display() );
         debug!(target:"spec", "dst-path:{}", path.display() );
