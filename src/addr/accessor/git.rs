@@ -15,7 +15,8 @@ use git2::{
     build::{CheckoutBuilder, RepoBuilder},
 };
 use home::home_dir;
-use orion_error::{ContextRecord, ToStructError, UvsFrom};
+use orion_error::traits_ext::{ContextRecord, ToStructError};
+use orion_error::UvsFrom;
 
 use orion_infra::path::ensure_path;
 
@@ -128,7 +129,7 @@ impl GitAccessor {
     /// 更新现有仓库
     fn update_repo(&self, addr: &GitRepository, repo: &Repository) -> AddrResult<()> {
         if !self.is_workdir_clean(repo)? {
-            return Err(AddrReason::from_biz().to_err().want("工作区有未提交的更改"));
+            return Err(AddrReason::from_biz().to_err().doing("工作区有未提交的更改"));
         }
         // 1. 获取远程更新
         self.fetch_updates(addr, repo)?;
@@ -143,7 +144,7 @@ impl GitAccessor {
     /// 执行 pull 操作：合并远程变更
     fn pull_updates(&self, _addr: &GitRepository, repo: &Repository) -> AddrResult<()> {
         // 获取当前分支信息
-        let head = repo.head().owe_data().want("get repo head")?;
+        let head = repo.head().owe_data().doing("get repo head")?;
         let branch_name = match head.shorthand() {
             Some(name) => name,
             None => return Ok(()), // 分离头状态不需要 pull
@@ -160,11 +161,11 @@ impl GitAccessor {
         let current_commit = head
             .peel_to_commit()
             .owe_data()
-            .want("current peel to commit")?;
+            .doing("current peel to commit")?;
         let upstream_commit = upstream_ref
             .peel_to_commit()
             .owe_data()
-            .want("upstream peel to commit ")?;
+            .doing("upstream peel to commit ")?;
 
         // 如果已经在最新状态，无需操作
         if current_commit.id() == upstream_commit.id() {
@@ -175,11 +176,11 @@ impl GitAccessor {
         let annotated_commit = repo
             .find_annotated_commit(upstream_commit.id())
             .owe_data()
-            .want("find annotated commit")?;
+            .doing("find annotated commit")?;
         let analysis = repo
             .merge_analysis(&[&annotated_commit])
             .owe_data()
-            .want("merge analysis")?;
+            .doing("merge analysis")?;
         //let analysis = repo.merge_analysis(&[&upstream_commit])?;
 
         if analysis.0.is_up_to_date() {
@@ -203,18 +204,18 @@ impl GitAccessor {
         // 获取当前分支名称
         let refname = match repo.head().owe_data()?.name() {
             Some(name) => name.to_string(),
-            None => return AddrReason::from_biz().err_result().want("无法获取分支名称"),
+            None => return AddrReason::from_biz().err_result().doing("无法获取分支名称"),
         };
 
         // 更新引用到上游提交
         repo.reference(&refname, upstream_commit.id(), true, "Fast-forward")
             .owe_data()
-            .want("reference update")?;
+            .doing("reference update")?;
 
         // 重置工作区到新提交
         repo.reset(upstream_commit.as_object(), ResetType::Hard, None)
             .owe_data()
-            .want("reset")?;
+            .doing("reset")?;
 
         Ok(())
     }
@@ -225,25 +226,25 @@ impl GitAccessor {
         let annotated_commit = repo
             .find_annotated_commit(upstream_commit.id())
             .owe_data()
-            .want("find annotated commit")?;
+            .doing("find annotated commit")?;
 
         // 执行合并
         repo.merge(&[&annotated_commit], Some(&mut MergeOptions::new()), None)
             .owe_data()
-            .want("merge")?;
+            .doing("merge")?;
 
         // 检查合并状态
-        if repo.index().owe_data().want("repo index")?.has_conflicts() {
+        if repo.index().owe_data().doing("repo index")?.has_conflicts() {
             return AddrReason::from_biz()
                 .err_result()
-                .want("合并冲突：需要手动解决");
+                .doing("合并冲突：需要手动解决");
         }
 
         // 创建合并提交
         let head_commit = repo
             .head()
             .owe_data()
-            .want("head")?
+            .doing("head")?
             .peel_to_commit()
             .owe_data()?;
         let mut index = repo.index().owe_data()?;
@@ -298,7 +299,7 @@ impl ResourceDownloader for GitAccessor {
         path: &Path,
         options: &DownloadOptions,
     ) -> AddrResult<UpdateUnit> {
-        let mut ctx = OperationContext::want("download local")
+        let mut ctx = OperationContext::doing("download local")
             .with_mod_path("addr/git")
             .with_auto_log();
         let addr = match addr {
@@ -306,22 +307,22 @@ impl ResourceDownloader for GitAccessor {
             _ => {
                 return AddrReason::Brief(format!("bad format for git {addr}"))
                     .err_result()
-                    .with(&ctx);
+                    .with_context(&ctx);
             }
         };
         let name = self.get_local_repo_name(addr);
         let cache_local = home_dir()
-            .ok_or(AddrReason::from_res().to_err().want("unget home"))?
+            .ok_or(AddrReason::from_res().to_err().doing("unget home"))?
             .join(".cache/galaxy");
-        ensure_path(&cache_local).owe_logic().with(&ctx)?;
+        ensure_path(&cache_local).owe_logic().with_context(&ctx)?;
         let mut git_local = cache_local.join(name.clone());
 
         ctx.record("repo", addr.repo().as_str());
         ctx.record("path", &git_local);
         debug!( target : "addr/git", "update options {:?} where :{} ", options, git_local.display() );
         if git_local.exists() && options.clean_git_cache() {
-            std::fs::remove_dir_all(&git_local).owe_logic().with(&ctx)?;
-            std::fs::create_dir_all(&git_local).owe_logic().with(&ctx)?;
+            std::fs::remove_dir_all(&git_local).owe_logic().with_context(&ctx)?;
+            std::fs::create_dir_all(&git_local).owe_logic().with_context(&ctx)?;
 
             ctx.warn("remove cache ");
         } else {
@@ -332,11 +333,11 @@ impl ResourceDownloader for GitAccessor {
             Ok(_re) => {
                 debug!(target :"spec", " use repo : {}", git_local.display());
                 //not need update git ;
-                //self.update_repo(&re).owe_data().with(&ctx)?;
+                //self.update_repo(&re).owe_data().with_context(&ctx)?;
             }
             Err(_) => {
                 debug!(target :"spec", "clone repo : {}", git_local.display());
-                self.clone_repo(addr, &git_local).owe_data().with(&ctx)?;
+                self.clone_repo(addr, &git_local).owe_data().with_context(&ctx)?;
             }
         }
         let mut real_path = path.to_path_buf();
@@ -349,10 +350,10 @@ impl ResourceDownloader for GitAccessor {
             real_path = real_path.join(name);
         }
         if real_path.exists() {
-            std::fs::remove_dir_all(&real_path).owe_res().with(&ctx)?;
+            std::fs::remove_dir_all(&real_path).owe_res().with_context(&ctx)?;
         }
 
-        std::fs::create_dir_all(&real_path).owe_res().with(&ctx)?;
+        std::fs::create_dir_all(&real_path).owe_res().with_context(&ctx)?;
         let options = CopyOptions::new();
         debug!(target:"spec", "src-path:{}", git_local.display() );
         debug!(target:"spec", "dst-path:{}", path.display() );
@@ -360,7 +361,7 @@ impl ResourceDownloader for GitAccessor {
         ctx.record("dst-path", &real_path);
         fs_extra::copy_items(&[&git_local], path, &options)
             .owe_res()
-            .with(&ctx)?;
+            .with_context(&ctx)?;
         ctx.mark_suc();
         Ok(UpdateUnit::from(real_path))
     }
@@ -374,13 +375,13 @@ impl ResourceUploader for GitAccessor {
         path: &Path,
         _options: &UploadOptions,
     ) -> AddrResult<UpdateUnit> {
-        let mut ctx = OperationContext::want("upload to repository")
+        let mut ctx = OperationContext::doing("upload to repository")
             .with_auto_log()
             .with_mod_path("addr/git");
         ctx.record("target", path.display().to_string());
 
         if !path.exists() {
-            return Err(AddrReason::from_res().to_err().want("path not exist"));
+            return Err(AddrReason::from_res().to_err().doing("path not exist"));
         }
         let temp_path = home_dir().unwrap_or(PathBuf::from("~/")).join(".temp");
         ensure_path(&temp_path).owe_logic()?;
@@ -449,7 +450,7 @@ impl GitAccessor {
             addr.clone()
         };
 
-        let mut ctx = OperationContext::want("clone repository")
+        let mut ctx = OperationContext::doing("clone repository")
             .with_auto_log()
             .with_mod_path("addr/git");
         ctx.record("repo", repo_addr.repo().as_str());
@@ -530,7 +531,7 @@ impl GitAccessor {
             let head = repo.head().owe_data()?;
             let _name = head
                 .name()
-                .ok_or_else(|| AddrReason::from_data().to_err().want("无法获取 HEAD 名称"))?;
+                .ok_or_else(|| AddrReason::from_data().to_err().doing("无法获取 HEAD 名称"))?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
                 .owe_data()?;
             Ok(())
@@ -578,7 +579,7 @@ impl GitAccessor {
             let refname = b
                 .get()
                 .name()
-                .ok_or_else(|| AddrReason::from_biz().to_err().want("无效的分支名称"))?;
+                .ok_or_else(|| AddrReason::from_biz().to_err().doing("无效的分支名称"))?;
             repo.set_head(refname).owe_data()?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
                 .owe_data()?;
@@ -605,7 +606,7 @@ impl GitAccessor {
 
         AddrReason::from_biz()
             .err_result()
-            .want(format!("分支 '{branch}' 不存在"))
+            .doing(format!("分支 '{branch}' 不存在"))
     }
 }
 
@@ -638,7 +639,8 @@ mod tests {
     use crate::{addr::AddrResult, tools::test_init};
 
     use super::*;
-    use orion_error::{ErrorOwe, TestAssert};
+    use orion_error::compat_traits::ErrorOwe;
+    use orion_error::testcase::TestAssert;
     use tempfile::tempdir;
 
     //git@e.coding.net:dy-sec/s-devkit/kubeconfig.git

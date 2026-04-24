@@ -4,7 +4,8 @@ use crate::types::ResourceDownloader;
 use crate::update::{DownloadOptions, UploadOptions};
 use contracts::debug_requires;
 use fs_extra::dir::CopyOptions;
-use orion_error::{ContextRecord, ToStructError, UvsFrom};
+use orion_error::traits_ext::{ContextRecord, ToStructError};
+use orion_error::UvsFrom;
 
 use crate::types::ResourceUploader;
 
@@ -24,7 +25,7 @@ impl ResourceDownloader for LocalAccessor {
             Address::Local(addr) => addr,
             _ => return Err(AddrReason::Brief(format!("addr type error {addr}")).to_err()),
         };
-        let mut ctx = OperationContext::want("update local addr")
+        let mut ctx = OperationContext::doing("update local addr")
             .with_auto_log()
             .with_mod_path("addr/local");
         ctx.record("src", addr.path().as_str());
@@ -47,7 +48,7 @@ impl ResourceDownloader for LocalAccessor {
         } else {
             fs_extra::dir::copy(&src, path, &options)
                 .owe_data()
-                .with(&ctx)?;
+                .with_context(&ctx)?;
         }
         ctx.mark_suc();
         Ok(UpdateUnit::from(dst))
@@ -79,7 +80,7 @@ impl ResourceUploader for LocalAccessor {
             _ => return Err(AddrReason::Brief(format!("addr type error {addr}")).to_err()),
         };
         if !path.exists() {
-            return Err(AddrReason::from_res().to_err().want("path not exist"));
+            return Err(AddrReason::from_res().to_err().doing("path not exist"));
         }
         if path.is_file() {
             let file_name = path
@@ -102,18 +103,18 @@ pub fn path_file_name(path: &Path) -> AddrResult<String> {
     let file_name = path
         .file_name()
         .and_then(|f| f.to_str())
-        .ok_or(AddrReason::from_conf().to_err().want("get file_name error"))?;
+        .ok_or(AddrReason::from_conf().to_err().doing("get file_name error"))?;
     Ok(file_name.to_string())
 }
 #[debug_requires(local.exists(), "local need exists")]
 pub fn rename_path(local: &Path, name: &str) -> AddrResult<PathBuf> {
-    let mut ctx = OperationContext::want("rename path")
+    let mut ctx = OperationContext::doing("rename path")
         .with_auto_log()
         .with_mod_path("addr/local");
     let dst_path = local
         .parent()
         .map(|x| x.join(name))
-        .ok_or(AddrReason::from_conf().to_err().want("bad path"))?;
+        .ok_or(AddrReason::from_conf().to_err().doing("bad path"))?;
 
     let _dst_copy = dst_path.clone();
     if dst_path.exists() {
@@ -124,17 +125,17 @@ pub fn rename_path(local: &Path, name: &str) -> AddrResult<PathBuf> {
         if dst_path.is_dir() {
             std::fs::remove_dir_all(&dst_path)
                 .owe_res()
-                .with(&dst_path)
-                .want("remove dst")?;
+                .with_context(&dst_path)
+                .doing("remove dst")?;
         } else {
             std::fs::remove_file(&dst_path)
                 .owe_res()
-                .with(&dst_path)
-                .want("remove dst")?;
+                .with_context(&dst_path)
+                .doing("remove dst")?;
         }
     }
     ctx.record("new path", dst_path.display().to_string());
-    std::fs::rename(local, &dst_path).owe_conf().with(&ctx)?;
+    std::fs::rename(local, &dst_path).owe_conf().with_context(&ctx)?;
     ctx.mark_suc();
     Ok(dst_path)
 }
@@ -148,7 +149,7 @@ mod tests {
     };
 
     use super::*;
-    use orion_error::TestAssert;
+    use orion_error::testcase::TestAssert;
     use orion_infra::path::ensure_path;
     use tempfile::tempdir;
 

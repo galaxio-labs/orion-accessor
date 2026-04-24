@@ -1,7 +1,7 @@
-## [Unreleased] - 2025-09-20
+## [0.7.0] - 2026-04-25
 
 ### Changed
-- Renamed the internal `prelude` module (formerly `predule`) and aligned all imports to match the conventional name.
-- `addr::accessor::create_http_client_by_ctrl` now returns `AddrResult<reqwest::Client>`, allowing callers such as `HttpAccessor` to surface timeout/proxy configuration errors instead of falling back silently.
-- Refined `GitRepository`'s builder-style API: consolidated optional setters, clarified the serialized `resource` field, and de-duplicated credential loading through a shared helper.
-- Updated the access control tests to call `save_yaml` instead of the deprecated `save_yml` helper so clippy passes with `-D warnings`.
+- 升级 `orion-error` 至 0.7。
+- `.want()` → `.doing()`，`.with()` → `.with_context()`，适配 orion-error 0.7 API。
+- `addr::accessor::create_http_client_by_ctrl` now returns `AddrResult<reqwest::Client>`.
+- Refined `GitRepository` builder API: consolidated optional setters and de-duplicated credential loading.

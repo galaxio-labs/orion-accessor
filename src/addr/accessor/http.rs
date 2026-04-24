@@ -12,7 +12,8 @@ use bytes::Bytes;
 use futures_core::stream::Stream;
 use getset::{Getters, WithSetters};
 use http_body::{Frame, SizeHint};
-use orion_error::{ContextRecord, ToStructError, UvsFrom};
+use orion_error::traits_ext::{ContextRecord, ToStructError};
+use orion_error::UvsFrom;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -113,7 +114,7 @@ impl HttpAccessor {
         method: &HttpMethod,
     ) -> AddrResult<()> {
         use indicatif::{ProgressBar, ProgressStyle};
-        let mut ctx = OperationContext::want("upload url")
+        let mut ctx = OperationContext::doing("upload url")
             .with_auto_log()
             .with_mod_path("addr/http");
         let addr = if let Some(direct_serv) = &self.ctrl {
@@ -124,7 +125,7 @@ impl HttpAccessor {
 
         let client =
             create_http_client_by_ctrl(self.ctrl().clone().and_then(|x| x.direct_http_ctrl(&addr)))
-                .with(&ctx)?;
+                .with_context(&ctx)?;
         let file_name = filename_of_url(addr.url()).unwrap_or_else(|| "file.bin".to_string());
         ctx.record("local file", file_path.as_ref());
         ctx.record("url ", addr.url().as_str());
@@ -136,8 +137,8 @@ impl HttpAccessor {
         let file = tokio::fs::File::open(&file_path)
             .await
             .owe_data()
-            .with(&ctx)?;
-        let metadata = file.metadata().await.owe_data().with(&ctx)?;
+            .with_context(&ctx)?;
+        let metadata = file.metadata().await.owe_data().with_context(&ctx)?;
         let content_len = metadata.len();
 
         // 创建原子计数器用于进度追踪
@@ -182,7 +183,7 @@ impl HttpAccessor {
             _ => {
                 return Err(AddrReason::from_res()
                     .to_err()
-                    .want(format!("Unsupported HTTP method: {method}")));
+                    .doing(format!("Unsupported HTTP method: {method}")));
             }
         };
 
@@ -192,8 +193,8 @@ impl HttpAccessor {
         ctx.debug("sending http upload request");
 
         // 发送请求 - 进度会在流读取时自动更新
-        let response = request.send().await.owe_res().with(&ctx)?;
-        response.error_for_status().owe_res().with(&ctx)?;
+        let response = request.send().await.owe_res().with_context(&ctx)?;
+        response.error_for_status().owe_res().with_context(&ctx)?;
 
         pb.finish_with_message("上传完成");
         ctx.info("upload completed");
@@ -236,26 +237,26 @@ impl HttpAccessor {
         if dest_path.exists() {
             std::fs::remove_file(dest_path).owe_res()?;
         }
-        let mut ctx = OperationContext::want("download url")
+        let mut ctx = OperationContext::doing("download url")
             .with_auto_log()
             .with_mod_path("addr/http");
         ctx.record("url", addr.url().as_str());
         let client =
             create_http_client_by_ctrl(self.ctrl().clone().and_then(|x| x.direct_http_ctrl(&addr)))
-                .with(&ctx)?;
+                .with_context(&ctx)?;
         let mut request = client.get(addr.url());
         if let (Some(u), Some(p)) = (addr.username(), addr.password()) {
             request = request.basic_auth(u, Some(p));
         }
 
         println!("downlaod from :{}", addr.url());
-        let mut response = request.send().await.owe_res().with(&ctx)?;
+        let mut response = request.send().await.owe_res().with_context(&ctx)?;
 
         if !response.status().is_success() {
             return Err(AddrReason::from_res()
                 .to_err()
-                .want(format!("HTTP request failed: {}", response.status())))
-            .with(&ctx);
+                .doing(format!("HTTP request failed: {}", response.status())))
+            .with_context(&ctx);
         }
 
         let total_size = response.content_length().unwrap_or(0);
@@ -264,7 +265,7 @@ impl HttpAccessor {
         let mut file = tokio::fs::File::create(&dest_path)
             .await
             .owe_conf()
-            .with(&ctx)?;
+            .with_context(&ctx)?;
 
         // 创建进度条
         let pb = ProgressBar::new(total_size);
@@ -280,8 +281,8 @@ impl HttpAccessor {
             total_size = total_size,
             "starting download stream"
         );
-        while let Some(chunk) = response.chunk().await.owe_data().with(&ctx)? {
-            file.write_all(&chunk).await.owe_sys().with(&ctx)?;
+        while let Some(chunk) = response.chunk().await.owe_data().with_context(&ctx)? {
+            file.write_all(&chunk).await.owe_sys().with_context(&ctx)?;
 
             downloaded += chunk.len() as u64;
             pb.set_position(downloaded);
@@ -348,7 +349,7 @@ impl ResourceUploader for HttpAccessor {
         options: &UploadOptions,
     ) -> AddrResult<UpdateUnit> {
         if !path.exists() {
-            return Err(AddrReason::from_res().to_err().want("path not exist"));
+            return Err(AddrReason::from_res().to_err().doing("path not exist"));
         }
         match addr {
             Address::Http(http) => {
@@ -380,7 +381,7 @@ mod tests {
 
     use super::*;
     use mockito::Matcher;
-    use orion_error::TestAssertWithMsg;
+    use orion_error::testcase::TestAssertWithMsg;
     use orion_infra::path::ensure_path;
 
     #[tokio::test(flavor = "current_thread")]

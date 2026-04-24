@@ -1,5 +1,5 @@
 use derive_more::From;
-use orion_error::{ErrorCode, StructError, UvsReason};
+use orion_error::{DomainReason, ErrorCode, StructError, UvsReason};
 use serde_derive::Serialize;
 use std::time::Duration;
 use thiserror::Error;
@@ -20,6 +20,8 @@ pub enum AddrReason {
     #[error("Retry exhausted after {attempts} attempts, last error: {last_error}")]
     RetryExhausted { attempts: u32, last_error: String },
 }
+
+impl DomainReason for AddrReason {}
 
 impl ErrorCode for AddrReason {
     fn error_code(&self) -> i32 {
