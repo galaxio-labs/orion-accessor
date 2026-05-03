@@ -2,7 +2,7 @@
 name = "orion-accessor"
 authors = ["wukong<sec-wukong@outlook.com>"]
 edition = "2024"
-version = "0.8.0"
+version = "0.8.1"
 description = "Unified accessor layer for HTTP, Git, and local resources with redirect rules, proxy control, and env-aware templating."
 license = "MIT"
 keywords = ["http", "git", "redirect", "proxy", "update"]

@@ -4,7 +4,6 @@ pub mod addr;
 pub mod archive;
 pub mod opt;
 mod prelude;
-pub mod raw;
 pub mod timeout;
 pub mod tools;
 pub mod types;

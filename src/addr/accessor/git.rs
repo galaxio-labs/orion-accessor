@@ -15,9 +15,8 @@ use git2::{
     build::{CheckoutBuilder, RepoBuilder},
 };
 use home::home_dir;
-use orion_error::prelude::SourceErr;
+use orion_error::prelude::{SourceErr, SourceRawErr};
 
-use crate::raw::raw_err;
 use orion_infra::path::ensure_path;
 
 ///
@@ -148,8 +147,7 @@ impl GitAccessor {
         // 获取当前分支信息
         let head = repo
             .head()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("get repo head")?;
         let branch_name = match head.shorthand() {
             Some(name) => name,
@@ -166,13 +164,11 @@ impl GitAccessor {
         // 获取当前提交和上游提交
         let current_commit = head
             .peel_to_commit()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("current peel to commit")?;
         let upstream_commit = upstream_ref
             .peel_to_commit()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("upstream peel to commit ")?;
 
         // 如果已经在最新状态，无需操作
@@ -183,13 +179,11 @@ impl GitAccessor {
         // 分析合并可能性
         let annotated_commit = repo
             .find_annotated_commit(upstream_commit.id())
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("find annotated commit")?;
         let analysis = repo
             .merge_analysis(&[&annotated_commit])
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("merge analysis")?;
         //let analysis = repo.merge_analysis(&[&upstream_commit])?;
 
@@ -214,8 +208,7 @@ impl GitAccessor {
         // 获取当前分支名称
         let refname = match repo
             .head()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?
+            .source_raw_err(AddrReason::data_error(), "")?
             .name()
         {
             Some(name) => name.to_string(),
@@ -228,14 +221,12 @@ impl GitAccessor {
 
         // 更新引用到上游提交
         repo.reference(&refname, upstream_commit.id(), true, "Fast-forward")
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("reference update")?;
 
         // 重置工作区到新提交
         repo.reset(upstream_commit.as_object(), ResetType::Hard, None)
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("reset")?;
 
         Ok(())
@@ -246,21 +237,18 @@ impl GitAccessor {
         // 创建带注释的提交 (修复类型不匹配)
         let annotated_commit = repo
             .find_annotated_commit(upstream_commit.id())
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("find annotated commit")?;
 
         // 执行合并
         repo.merge(&[&annotated_commit], Some(&mut MergeOptions::new()), None)
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("merge")?;
 
         // 检查合并状态
         if repo
             .index()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("repo index")?
             .has_conflicts()
         {
@@ -272,24 +260,19 @@ impl GitAccessor {
         // 创建合并提交
         let head_commit = repo
             .head()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")
+            .source_raw_err(AddrReason::data_error(), "")
             .doing("head")?
             .peel_to_commit()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
         let mut index = repo
             .index()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
         let tree_oid = index
             .write_tree()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
         let tree = repo
             .find_tree(tree_oid)
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
 
         repo.commit(
             Some("HEAD"),
@@ -299,13 +282,11 @@ impl GitAccessor {
             &tree,
             &[&head_commit, upstream_commit],
         )
-        .map_err(raw_err)
-        .source_err(AddrReason::data_error(), "")?;
+        .source_raw_err(AddrReason::data_error(), "")?;
 
         // 清理合并状态
         repo.cleanup_state()
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
 
         Ok(())
     }
@@ -318,8 +299,7 @@ impl GitAccessor {
 
         let statuses = repo
             .statuses(Some(&mut options))
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
         Ok(statuses.is_empty())
     }
 
@@ -374,12 +354,10 @@ impl ResourceDownloader for GitAccessor {
         debug!( target : "addr/git", "update options {:?} where :{} ", options, git_local.display() );
         if git_local.exists() && options.clean_git_cache() {
             std::fs::remove_dir_all(&git_local)
-                .map_err(raw_err)
-                .source_err(AddrReason::logic_error(), "")
+                .source_raw_err(AddrReason::logic_error(), "")
                 .with_context(&ctx)?;
             std::fs::create_dir_all(&git_local)
-                .map_err(raw_err)
-                .source_err(AddrReason::logic_error(), "")
+                .source_raw_err(AddrReason::logic_error(), "")
                 .with_context(&ctx)?;
 
             ctx.warn("remove cache ");
@@ -391,7 +369,7 @@ impl ResourceDownloader for GitAccessor {
             Ok(_re) => {
                 debug!(target :"spec", " use repo : {}", git_local.display());
                 //not need update git ;
-                //self.update_repo(&re).map_err(raw_err).source_err(AddrReason::data_error(), "").with_context(&ctx)?;
+                //self.update_repo(&re).source_raw_err(AddrReason::data_error(), "").with_context(&ctx)?;
             }
             Err(_) => {
                 debug!(target :"spec", "clone repo : {}", git_local.display());
@@ -557,8 +535,7 @@ impl GitAccessor {
         // 执行克隆
         let repo = builder
             .clone(repo_addr.repo(), target_dir)
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
 
         ctx.mark_suc();
         // 处理检出目标
@@ -570,8 +547,7 @@ impl GitAccessor {
         // 查找 origin 远程
         let mut remote = repo
             .find_remote("origin")
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
 
         // 准备认证回调
         let callbacks = self.build_remote_callbacks(addr); // 使用构建的回调
@@ -589,8 +565,7 @@ impl GitAccessor {
         // 执行获取操作
         remote
             .fetch(&[] as &[&str], Some(&mut fetch_options), None)
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
 
         // 更新远程引用
         remote
@@ -600,9 +575,7 @@ impl GitAccessor {
                 git2::AutotagOption::All,
                 None,
             )
-            .map_err(raw_err)
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
 
         Ok(())
     }
@@ -613,24 +586,21 @@ impl GitAccessor {
             self.checkout_revision(addr, repo, rev)
         } else if let Some(tag) = addr.tag() {
             self.checkout_tag(addr, repo, tag)
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")
+                .source_raw_err(AddrReason::data_error(), "")
         } else if let Some(branch) = addr.branch() {
             self.checkout_branch(addr, repo, branch)
         } else {
             // 默认检出默认分支
             let head = repo
                 .head()
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")?;
+                .source_raw_err(AddrReason::data_error(), "")?;
             let _name = head.name().ok_or_else(|| {
                 AddrReason::data_error()
                     .to_err()
                     .doing("无法获取 HEAD 名称")
             })?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")?;
+                .source_raw_err(AddrReason::data_error(), "")?;
             Ok(())
         }
     }
@@ -644,14 +614,11 @@ impl GitAccessor {
     ) -> AddrResult<()> {
         let obj = repo
             .revparse_single(rev)
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
         repo.checkout_tree(&obj, Some(&mut CheckoutBuilder::new().force()))
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
         repo.set_head_detached(obj.id())
-            .map_err(raw_err)
-            .source_err(AddrReason::data_error(), "")?;
+            .source_raw_err(AddrReason::data_error(), "")?;
         Ok(())
     }
 
@@ -685,11 +652,9 @@ impl GitAccessor {
                     .doing("无效的分支名称")
             })?;
             repo.set_head(refname)
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")?;
+                .source_raw_err(AddrReason::data_error(), "")?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")?;
+                .source_raw_err(AddrReason::data_error(), "")?;
             return Ok(());
         }
 
@@ -700,25 +665,20 @@ impl GitAccessor {
             let commit = b
                 .get()
                 .peel_to_commit()
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")?;
+                .source_raw_err(AddrReason::data_error(), "")?;
             let mut new_branch = repo
                 .branch(branch, &commit, false)
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")?;
+                .source_raw_err(AddrReason::data_error(), "")?;
             new_branch
                 .set_upstream(Some(&format!("origin/{branch}")))
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")?;
+                .source_raw_err(AddrReason::data_error(), "")?;
 
             // 切换到新分支
             let refname = format!("refs/heads/{branch}");
             repo.set_head(&refname)
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")?;
+                .source_raw_err(AddrReason::data_error(), "")?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")?;
+                .source_raw_err(AddrReason::data_error(), "")?;
             return Ok(());
         }
 
@@ -790,12 +750,10 @@ mod tests {
 
         // 验证分支/标签是否正确检出
         let repo = git2::Repository::open(cloned_v.position())
-            .map_err(raw_err)
-            .source_err(AddrReason::resource_error(), "")?;
+            .source_raw_err(AddrReason::resource_error(), "")?;
         let head = repo
             .head()
-            .map_err(raw_err)
-            .source_err(AddrReason::resource_error(), "")?;
+            .source_raw_err(AddrReason::resource_error(), "")?;
         assert!(head.is_branch() || head.is_tag());
 
         Ok(())
@@ -1014,12 +972,10 @@ mod tests {
 
         // 验证分支是否正确检出
         let repo = git2::Repository::open(git_up.position())
-            .map_err(raw_err)
-            .source_err(AddrReason::resource_error(), "")?;
+            .source_raw_err(AddrReason::resource_error(), "")?;
         let head = repo
             .head()
-            .map_err(raw_err)
-            .source_err(AddrReason::resource_error(), "")?;
+            .source_raw_err(AddrReason::resource_error(), "")?;
         assert!(head.is_branch());
 
         Ok(())

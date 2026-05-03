@@ -1,11 +1,10 @@
 use crate::addr::{AddrReason, AddrResult, Address};
 use crate::prelude::*;
-use crate::raw::raw_err;
 use crate::types::ResourceDownloader;
 use crate::update::{DownloadOptions, UploadOptions};
 use contracts::debug_requires;
 use fs_extra::dir::CopyOptions;
-use orion_error::prelude::SourceErr;
+use orion_error::prelude::{SourceErr, SourceRawErr};
 
 use crate::types::ResourceUploader;
 
@@ -47,8 +46,7 @@ impl ResourceDownloader for LocalAccessor {
             );
         } else {
             fs_extra::dir::copy(&src, path, &options)
-                .map_err(raw_err)
-                .source_err(AddrReason::data_error(), "")
+                .source_raw_err(AddrReason::data_error(), "")
                 .with_context(&ctx)?;
         }
         ctx.mark_suc();
