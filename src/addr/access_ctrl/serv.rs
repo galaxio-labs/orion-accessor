@@ -5,7 +5,7 @@ use orion_conf::YamlIO;
 
 use crate::{
     addr::{
-        AddrError, GitRepository, HttpResource,
+        AddrError, AddrReason, GitRepository, HttpResource,
         access_ctrl::{
             auth::AuthConfig,
             unit::{RedirectResult, Unit},
@@ -116,7 +116,11 @@ impl TryFrom<&PathBuf> for NetAccessCtrl {
 
     fn try_from(value: &PathBuf) -> Result<Self, Self::Error> {
         NetAccessCtrl::load_yaml(value)
-            .owe_res()
+            .map_err(|e| {
+                AddrReason::resource_error()
+                    .to_err()
+                    .with_detail(e.to_string())
+            })
             .with_context(value)
     }
 }

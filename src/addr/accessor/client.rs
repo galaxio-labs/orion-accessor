@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use crate::addr::{AddrReason, AddrResult, access_ctrl::UnitCtrl};
-use orion_error::traits_ext::ToStructError;
-use orion_error::{ErrorWith, UvsFrom};
+use orion_error::conversion::ToStructError;
+use orion_error::prelude::ErrorWith;
 
 use reqwest::{ClientBuilder, Proxy};
 
@@ -27,7 +27,7 @@ pub fn create_http_client_by_ctrl(ctrl: Option<UnitCtrl>) -> AddrResult<reqwest:
     }
     builder.build().map_err(|e| {
         tracing::error!("创建HTTP客户端失败: {}", e);
-        AddrReason::from_res()
+        AddrReason::resource_error()
             .to_err()
             .doing(format!("create HTTP client failed: {e}"))
     })

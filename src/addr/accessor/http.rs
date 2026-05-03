@@ -8,12 +8,12 @@ use crate::{
     update::{DownloadOptions, HttpMethod, UploadOptions},
 };
 
+use crate::raw::raw_err;
 use bytes::Bytes;
 use futures_core::stream::Stream;
 use getset::{Getters, WithSetters};
 use http_body::{Frame, SizeHint};
-use orion_error::UvsFrom;
-use orion_error::traits_ext::{ContextRecord, ToStructError};
+use orion_error::prelude::SourceErr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -127,7 +127,7 @@ impl HttpAccessor {
             create_http_client_by_ctrl(self.ctrl().clone().and_then(|x| x.direct_http_ctrl(&addr)))
                 .with_context(&ctx)?;
         let file_name = filename_of_url(addr.url()).unwrap_or_else(|| "file.bin".to_string());
-        ctx.record("local file", file_path.as_ref());
+        ctx.record("local file", file_path.as_ref().display());
         ctx.record("url ", addr.url().as_str());
         ctx.record("file", file_name.as_str());
 
@@ -136,9 +136,15 @@ impl HttpAccessor {
         // 异步打开文件并获取大小
         let file = tokio::fs::File::open(&file_path)
             .await
-            .owe_data()
+            .map_err(raw_err)
+            .source_err(AddrReason::data_error(), "")
             .with_context(&ctx)?;
-        let metadata = file.metadata().await.owe_data().with_context(&ctx)?;
+        let metadata = file
+            .metadata()
+            .await
+            .map_err(raw_err)
+            .source_err(AddrReason::data_error(), "")
+            .with_context(&ctx)?;
         let content_len = metadata.len();
 
         // 创建原子计数器用于进度追踪
@@ -147,7 +153,7 @@ impl HttpAccessor {
         // 创建进度条
         let pb = ProgressBar::new(content_len);
         pb.set_style(ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})").owe_logic()?
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})").map_err(raw_err).source_err(AddrReason::logic_error(), "")?
             .progress_chars("#>-"));
 
         // 创建进度追踪流
@@ -181,7 +187,7 @@ impl HttpAccessor {
                 request
             }
             _ => {
-                return Err(AddrReason::from_res()
+                return Err(AddrReason::resource_error()
                     .to_err()
                     .doing(format!("Unsupported HTTP method: {method}")));
             }
@@ -193,8 +199,17 @@ impl HttpAccessor {
         ctx.debug("sending http upload request");
 
         // 发送请求 - 进度会在流读取时自动更新
-        let response = request.send().await.owe_res().with_context(&ctx)?;
-        response.error_for_status().owe_res().with_context(&ctx)?;
+        let response = request
+            .send()
+            .await
+            .map_err(raw_err)
+            .source_err(AddrReason::resource_error(), "")
+            .with_context(&ctx)?;
+        response
+            .error_for_status()
+            .map_err(raw_err)
+            .source_err(AddrReason::resource_error(), "")
+            .with_context(&ctx)?;
 
         pb.finish_with_message("上传完成");
         ctx.info("upload completed");
@@ -235,7 +250,9 @@ impl HttpAccessor {
             return Ok(dest_path.to_path_buf());
         }
         if dest_path.exists() {
-            std::fs::remove_file(dest_path).owe_res()?;
+            std::fs::remove_file(dest_path)
+                .map_err(raw_err)
+                .source_err(AddrReason::resource_error(), "")?;
         }
         let mut ctx = OperationContext::doing("download url")
             .with_auto_log()
@@ -250,10 +267,15 @@ impl HttpAccessor {
         }
 
         println!("downlaod from :{}", addr.url());
-        let mut response = request.send().await.owe_res().with_context(&ctx)?;
+        let mut response = request
+            .send()
+            .await
+            .map_err(raw_err)
+            .source_err(AddrReason::resource_error(), "")
+            .with_context(&ctx)?;
 
         if !response.status().is_success() {
-            return Err(AddrReason::from_res()
+            return Err(AddrReason::resource_error()
                 .to_err()
                 .doing(format!("HTTP request failed: {}", response.status())))
             .with_context(&ctx);
@@ -264,13 +286,14 @@ impl HttpAccessor {
         ctx.record("local", dest_path.display().to_string());
         let mut file = tokio::fs::File::create(&dest_path)
             .await
-            .owe_conf()
+            .map_err(raw_err)
+            .source_err(AddrReason::core_conf(), "")
             .with_context(&ctx)?;
 
         // 创建进度条
         let pb = ProgressBar::new(total_size);
         pb.set_style(ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})").owe_logic()?
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})").map_err(raw_err).source_err(AddrReason::logic_error(), "")?
             .progress_chars("#>-"));
 
         let mut downloaded: u64 = 0;
@@ -281,8 +304,18 @@ impl HttpAccessor {
             total_size = total_size,
             "starting download stream"
         );
-        while let Some(chunk) = response.chunk().await.owe_data().with_context(&ctx)? {
-            file.write_all(&chunk).await.owe_sys().with_context(&ctx)?;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(raw_err)
+            .source_err(AddrReason::data_error(), "")
+            .with_context(&ctx)?
+        {
+            file.write_all(&chunk)
+                .await
+                .map_err(raw_err)
+                .source_err(AddrReason::system_error(), "")
+                .with_context(&ctx)?;
 
             downloaded += chunk.len() as u64;
             pb.set_position(downloaded);
@@ -349,16 +382,18 @@ impl ResourceUploader for HttpAccessor {
         options: &UploadOptions,
     ) -> AddrResult<UpdateUnit> {
         if !path.exists() {
-            return Err(AddrReason::from_res().to_err().doing("path not exist"));
+            return Err(AddrReason::resource_error()
+                .to_err()
+                .doing("path not exist"));
         }
         match addr {
             Address::Http(http) => {
                 self.upload(http, path, options.http_method()).await?;
                 /*
                 if path.is_file() {
-                    std::fs::remove_file(path).owe_res()?;
+                    std::fs::remove_file(path).map_err(raw_err).source_err(AddrReason::resource_error(), "")?;
                 } else {
-                    std::fs::remove_dir_all(path).owe_res()?;
+                    std::fs::remove_dir_all(path).map_err(raw_err).source_err(AddrReason::resource_error(), "")?;
                 }
                 */
                 Ok(UpdateUnit::from(path.to_path_buf()))
@@ -381,7 +416,7 @@ mod tests {
 
     use super::*;
     use mockito::Matcher;
-    use orion_error::testcase::TestAssertWithMsg;
+    use orion_error::dev::testing::TestAssertWithMsg;
     use orion_infra::path::ensure_path;
 
     #[tokio::test(flavor = "current_thread")]
@@ -399,7 +434,9 @@ mod tests {
         let temp_dir = PathBuf::from("./tests/temp");
         let test_file = temp_dir.join("wpflow.txt");
         if test_file.exists() {
-            std::fs::remove_file(&test_file).owe_res()?;
+            std::fs::remove_file(&test_file)
+                .map_err(raw_err)
+                .source_err(AddrReason::resource_error(), "")?;
         }
         let http_addr = HttpResource::from(format!("{}/wpflow.txt", server.url()))
             .with_credentials(
@@ -439,7 +476,9 @@ mod tests {
         ensure_path(&temp_dir).assert("path");
         let test_file = temp_dir.join("unkonw.txt");
         if test_file.exists() {
-            std::fs::remove_file(&test_file).owe_res()?;
+            std::fs::remove_file(&test_file)
+                .map_err(raw_err)
+                .source_err(AddrReason::resource_error(), "")?;
         }
         let redirect = NetAccessCtrl::from_rule(
             Rule::new(
@@ -498,11 +537,14 @@ mod tests {
             .create();
 
         // 2. 创建临时测试文件
-        let temp_dir = tempfile::tempdir().owe_res()?;
+        let temp_dir = tempfile::tempdir()
+            .map_err(raw_err)
+            .source_err(AddrReason::resource_error(), "")?;
         let file_path = temp_dir.path().join("test.txt");
         tokio::fs::write(&file_path, "test content")
             .await
-            .owe_sys()?;
+            .map_err(raw_err)
+            .source_err(AddrReason::system_error(), "")?;
 
         // 3. 执行上传
         let http_addr = HttpResource::from(format!("{}/upload", server.url())).with_credentials(
@@ -531,11 +573,14 @@ mod tests {
             .create();
 
         // 2. 创建临时测试文件
-        let temp_dir = tempfile::tempdir().owe_res()?;
+        let temp_dir = tempfile::tempdir()
+            .map_err(raw_err)
+            .source_err(AddrReason::resource_error(), "")?;
         let file_path = temp_dir.path().join("test_put.txt");
         tokio::fs::write(&file_path, "test put content")
             .await
-            .owe_sys()?;
+            .map_err(raw_err)
+            .source_err(AddrReason::system_error(), "")?;
 
         // 3. 执行上传
         let http_addr = HttpResource::from(format!("{}/upload_put", server.url()))

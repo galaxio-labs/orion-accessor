@@ -1,38 +1,36 @@
 use derive_more::From;
-use orion_error::{DomainReason, ErrorCode, StructError, UvsReason};
+use orion_error::OrionError;
+use orion_error::{StructError, UnifiedReason};
 use serde_derive::Serialize;
 use std::time::Duration;
-use thiserror::Error;
 
-#[derive(Clone, Debug, Serialize, PartialEq, Error, From)]
+#[derive(Clone, Debug, Serialize, PartialEq, From, OrionError)]
 pub enum AddrReason {
-    #[error("unknown")]
+    #[orion_error(identity = "biz.addr.brief", code = 500)]
     Brief(String),
-    #[error("{0}")]
-    Uvs(UvsReason),
-    #[error("Operation timed out after {timeout:?} and {attempts} attempts")]
+    #[orion_error(transparent)]
+    Unified(UnifiedReason),
+    #[orion_error(
+        identity = "biz.addr.operation_timeout",
+        code = 408,
+        message = "operation timed out"
+    )]
     OperationTimeoutExceeded { timeout: Duration, attempts: u32 },
-    #[error("Total timeout {total_timeout:?} exceeded after {elapsed:?}")]
+    #[orion_error(
+        identity = "biz.addr.total_timeout",
+        code = 408,
+        message = "total timeout exceeded"
+    )]
     TotalTimeoutExceeded {
         total_timeout: Duration,
         elapsed: Duration,
     },
-    #[error("Retry exhausted after {attempts} attempts, last error: {last_error}")]
+    #[orion_error(
+        identity = "biz.addr.retry_exhausted",
+        code = 504,
+        message = "retry exhausted"
+    )]
     RetryExhausted { attempts: u32, last_error: String },
-}
-
-impl DomainReason for AddrReason {}
-
-impl ErrorCode for AddrReason {
-    fn error_code(&self) -> i32 {
-        match self {
-            AddrReason::Brief(_) => 500,
-            AddrReason::Uvs(r) => r.error_code(),
-            AddrReason::OperationTimeoutExceeded { .. } => 408,
-            AddrReason::TotalTimeoutExceeded { .. } => 408,
-            AddrReason::RetryExhausted { .. } => 504,
-        }
-    }
 }
 
 pub type AddrResult<T> = Result<T, StructError<AddrReason>>;
@@ -41,13 +39,14 @@ pub type AddrError = StructError<AddrReason>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use orion_error::reason::ErrorCode;
     use std::time::Duration;
 
     #[test]
     fn test_addr_reason_brief() {
         let reason = AddrReason::Brief("test error".to_string());
         assert_eq!(reason.error_code(), 500);
-        assert_eq!(reason.to_string(), "unknown");
+        assert_eq!(reason.to_string(), "brief");
     }
 
     #[test]
@@ -58,9 +57,7 @@ mod tests {
             attempts: 3,
         };
         assert_eq!(reason.error_code(), 408);
-        let error_msg = reason.to_string();
-        assert!(error_msg.contains("30s"));
-        assert!(error_msg.contains("3 attempts"));
+        assert_eq!(reason.to_string(), "operation timed out");
     }
 
     #[test]
@@ -72,9 +69,7 @@ mod tests {
             elapsed,
         };
         assert_eq!(reason.error_code(), 408);
-        let error_msg = reason.to_string();
-        assert!(error_msg.contains("60s"));
-        assert!(error_msg.contains("65s"));
+        assert_eq!(reason.to_string(), "total timeout exceeded");
     }
 
     #[test]
@@ -84,8 +79,6 @@ mod tests {
             last_error: "connection failed".to_string(),
         };
         assert_eq!(reason.error_code(), 504);
-        let error_msg = reason.to_string();
-        assert!(error_msg.contains("5 attempts"));
-        assert!(error_msg.contains("connection failed"));
+        assert_eq!(reason.to_string(), "retry exhausted");
     }
 }

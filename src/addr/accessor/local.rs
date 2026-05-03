@@ -1,11 +1,11 @@
 use crate::addr::{AddrReason, AddrResult, Address};
 use crate::prelude::*;
+use crate::raw::raw_err;
 use crate::types::ResourceDownloader;
 use crate::update::{DownloadOptions, UploadOptions};
 use contracts::debug_requires;
 use fs_extra::dir::CopyOptions;
-use orion_error::UvsFrom;
-use orion_error::traits_ext::{ContextRecord, ToStructError};
+use orion_error::prelude::SourceErr;
 
 use crate::types::ResourceUploader;
 
@@ -33,13 +33,13 @@ impl ResourceDownloader for LocalAccessor {
         let src = PathBuf::from(addr.path().as_str());
         let options = CopyOptions::new().overwrite(true); // 默认选项
 
-        std::fs::create_dir_all(path).owe_res()?;
+        std::fs::create_dir_all(path).source_err(AddrReason::resource_error(), "")?;
         let name = path_file_name(&src)?;
         let dst = path.join(name);
         let _dst_copy = dst.clone();
 
         if src.is_file() {
-            std::fs::copy(&src, &dst).owe_res()?;
+            std::fs::copy(&src, &dst).source_err(AddrReason::resource_error(), "")?;
         } else if dst.exists() && up_options.reuse_cache() {
             info!(
                 target : "spec/addr/local",
@@ -47,7 +47,8 @@ impl ResourceDownloader for LocalAccessor {
             );
         } else {
             fs_extra::dir::copy(&src, path, &options)
-                .owe_data()
+                .map_err(raw_err)
+                .source_err(AddrReason::data_error(), "")
                 .with_context(&ctx)?;
         }
         ctx.mark_suc();
@@ -80,7 +81,9 @@ impl ResourceUploader for LocalAccessor {
             _ => return Err(AddrReason::Brief(format!("addr type error {addr}")).to_err()),
         };
         if !path.exists() {
-            return Err(AddrReason::from_res().to_err().doing("path not exist"));
+            return Err(AddrReason::resource_error()
+                .to_err()
+                .doing("path not exist"));
         }
         if path.is_file() {
             let file_name = path
@@ -88,12 +91,16 @@ impl ResourceUploader for LocalAccessor {
                 .and_then(|f| f.to_str())
                 .unwrap_or("UNKNOW");
             let target_path = Path::new(addr.path()).join(file_name);
-            std::fs::copy(path, target_path).owe_res()?;
-            std::fs::remove_file(path).owe_res()?;
+            std::fs::copy(path, target_path).source_err(AddrReason::resource_error(), "")?;
+            std::fs::remove_file(path).source_err(AddrReason::resource_error(), "")?;
         } else {
             let copy_options = CopyOptions::new().overwrite(true).copy_inside(true);
-            fs_extra::dir::copy(path, addr.path(), &copy_options).owe_res()?;
-            std::fs::remove_dir_all(path).owe_res()?;
+            fs_extra::dir::copy(path, addr.path(), &copy_options).map_err(|e| {
+                AddrReason::resource_error()
+                    .to_err()
+                    .with_detail(e.to_string())
+            })?;
+            std::fs::remove_dir_all(path).source_err(AddrReason::resource_error(), "")?;
         }
         Ok(UpdateUnit::from(path.to_path_buf()))
     }
@@ -101,7 +108,7 @@ impl ResourceUploader for LocalAccessor {
 
 pub fn path_file_name(path: &Path) -> AddrResult<String> {
     let file_name = path.file_name().and_then(|f| f.to_str()).ok_or(
-        AddrReason::from_conf()
+        AddrReason::core_conf()
             .to_err()
             .doing("get file_name error"),
     )?;
@@ -115,7 +122,7 @@ pub fn rename_path(local: &Path, name: &str) -> AddrResult<PathBuf> {
     let dst_path = local
         .parent()
         .map(|x| x.join(name))
-        .ok_or(AddrReason::from_conf().to_err().doing("bad path"))?;
+        .ok_or(AddrReason::core_conf().to_err().doing("bad path"))?;
 
     let _dst_copy = dst_path.clone();
     if dst_path.exists() {
@@ -125,19 +132,19 @@ pub fn rename_path(local: &Path, name: &str) -> AddrResult<PathBuf> {
         }
         if dst_path.is_dir() {
             std::fs::remove_dir_all(&dst_path)
-                .owe_res()
+                .source_err(AddrReason::resource_error(), "")
                 .with_context(&dst_path)
                 .doing("remove dst")?;
         } else {
             std::fs::remove_file(&dst_path)
-                .owe_res()
+                .source_err(AddrReason::resource_error(), "")
                 .with_context(&dst_path)
                 .doing("remove dst")?;
         }
     }
     ctx.record("new path", dst_path.display().to_string());
     std::fs::rename(local, &dst_path)
-        .owe_conf()
+        .source_err(AddrReason::core_conf(), "")
         .with_context(&ctx)?;
     ctx.mark_suc();
     Ok(dst_path)
@@ -152,7 +159,7 @@ mod tests {
     };
 
     use super::*;
-    use orion_error::testcase::TestAssert;
+    use orion_error::dev::testing::TestAssert;
     use orion_infra::path::ensure_path;
     use tempfile::tempdir;
 
@@ -161,9 +168,9 @@ mod tests {
         test_init();
         let temp_path = PathBuf::from("./tests/temp/local");
         if temp_path.exists() {
-            std::fs::remove_dir_all(&temp_path).owe_conf()?;
+            std::fs::remove_dir_all(&temp_path).source_err(AddrReason::core_conf(), "")?;
         }
-        std::fs::create_dir_all(&temp_path).owe_conf()?;
+        std::fs::create_dir_all(&temp_path).source_err(AddrReason::core_conf(), "")?;
         let local = LocalPath::from("./tests/data/sys-1");
         let addr_type = Address::Local(local.clone());
         LocalAccessor::default()
@@ -182,8 +189,8 @@ mod tests {
             )
             .await?;
 
-        assert!(std::fs::exists(temp_path.join("sys-3")).owe_conf()?);
-        //assert!(std::fs::exists(temp_path.join("sys-1")).owe_conf()?);
+        assert!(std::fs::exists(temp_path.join("sys-3")).source_err(AddrReason::core_conf(), "")?);
+        //assert!(std::fs::exists(temp_path.join("sys-1")).source_err(AddrReason::core_conf(), "")?);
         Ok(())
     }
 

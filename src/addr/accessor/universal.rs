@@ -155,7 +155,7 @@ impl Clone for UniversalAccessor {
 mod tests {
     use std::path::PathBuf;
 
-    use orion_error::testcase::TestAssert;
+    use orion_error::dev::testing::TestAssert;
 
     use super::*;
     use crate::addr::{Address, GitRepository, LocalPath};
