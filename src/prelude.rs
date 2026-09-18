@@ -1,7 +1,7 @@
 pub use log::{debug, info};
+pub use orion_error::OperationContext;
 pub use orion_error::conversion::ToStructError;
 pub use orion_error::prelude::ErrorWith;
-pub use orion_error::OperationContext;
 pub use serde_derive::{Deserialize, Serialize};
 
 pub use async_trait::async_trait;

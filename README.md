@@ -1,7 +1,7 @@
 # Orion Accessor
 
-[![CI](https://github.com/galaxy-sec/orion-accessor/workflows/CI/badge.svg)](https://github.com/galaxy-sec/orion-accessor/actions)
-[![Coverage Status](https://codecov.io/gh/galaxy-sec/orion-accessor/branch/main/graph/badge.svg)](https://codecov.io/gh/galaxy-sec/orion-accessor)
+[![CI](https://github.com/galaxio-labs/orion-accessor/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/galaxio-labs/orion-accessor/actions)
+[![Coverage Status](https://codecov.io/gh/galaxio-labs/orion-accessor/branch/main/graph/badge.svg)](https://codecov.io/gh/galaxio-labs/orion-accessor)
 [![crates.io](https://img.shields.io/crates/v/orion-accessor.svg)](https://crates.io/crates/orion-accessor)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 

@@ -1,3 +1,23 @@
+## [0.8.2] - 2026-09-18
+
+### Changed
+
+- 升级 `git2` 至 0.21，规避 `git2` 0.20 的 RUSTSEC-2026-0183 / RUSTSEC-2026-0184（0.21.0 起已修复）。
+  - 适配其 API 变更：`Repository::head()` 的 `shorthand()` 与 `Reference::name()` 由 `Option<&str>` 改为 `Result<&str, git2::Error>`；`src/addr/accessor/git.rs` 的 4 处调用相应调整，取不到名称时依旧沿用原分支行为。
+- 升级 `reqwest` 至 0.13。
+- README 徽章的仓库地址由历史的 `galaxy-sec` 更正为 `galaxio-labs`；CI 徽章改用非弃用的 `actions/workflows/<file>` 形式并固定 `?branch=main`。
+- `Cargo.toml` 的 `repository` 字段同步更正为 `galaxio-labs`（已发布版本的元数据不会变，需下次发布后在 crates.io 生效）。
+
+### Added
+
+- 新增 `LICENSE`（MIT，`Copyright (c) 2025 galaxio-labs`）。此前仓库缺少许可文件，但 `Cargo.toml` 已声明 `license = "MIT"`，README 末尾的 `[LICENSE](LICENSE)` 也是死链。
+
+### Dependencies
+
+- `git2`: `0.20` → `0.21`
+- `reqwest`: `0.12` → `0.13`
+- `rstest` (dev): `0.26` → `0.27`
+
 ## [0.8.0] - 2026-05-03
 
 ### Changed

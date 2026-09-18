@@ -245,8 +245,7 @@ impl HttpAccessor {
             return Ok(dest_path.to_path_buf());
         }
         if dest_path.exists() {
-            std::fs::remove_file(dest_path)
-                .source_raw_err(AddrReason::resource_error(), "")?;
+            std::fs::remove_file(dest_path).source_raw_err(AddrReason::resource_error(), "")?;
         }
         let mut ctx = OperationContext::doing("download url")
             .with_auto_log()
@@ -424,8 +423,7 @@ mod tests {
         let temp_dir = PathBuf::from("./tests/temp");
         let test_file = temp_dir.join("wpflow.txt");
         if test_file.exists() {
-            std::fs::remove_file(&test_file)
-                .source_raw_err(AddrReason::resource_error(), "")?;
+            std::fs::remove_file(&test_file).source_raw_err(AddrReason::resource_error(), "")?;
         }
         let http_addr = HttpResource::from(format!("{}/wpflow.txt", server.url()))
             .with_credentials(
@@ -465,8 +463,7 @@ mod tests {
         ensure_path(&temp_dir).assert("path");
         let test_file = temp_dir.join("unkonw.txt");
         if test_file.exists() {
-            std::fs::remove_file(&test_file)
-                .source_raw_err(AddrReason::resource_error(), "")?;
+            std::fs::remove_file(&test_file).source_raw_err(AddrReason::resource_error(), "")?;
         }
         let redirect = NetAccessCtrl::from_rule(
             Rule::new(
@@ -525,8 +522,7 @@ mod tests {
             .create();
 
         // 2. 创建临时测试文件
-        let temp_dir = tempfile::tempdir()
-            .source_raw_err(AddrReason::resource_error(), "")?;
+        let temp_dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
         let file_path = temp_dir.path().join("test.txt");
         tokio::fs::write(&file_path, "test content")
             .await
@@ -559,8 +555,7 @@ mod tests {
             .create();
 
         // 2. 创建临时测试文件
-        let temp_dir = tempfile::tempdir()
-            .source_raw_err(AddrReason::resource_error(), "")?;
+        let temp_dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
         let file_path = temp_dir.path().join("test_put.txt");
         tokio::fs::write(&file_path, "test put content")
             .await

@@ -150,8 +150,8 @@ impl GitAccessor {
             .source_raw_err(AddrReason::data_error(), "")
             .doing("get repo head")?;
         let branch_name = match head.shorthand() {
-            Some(name) => name,
-            None => return Ok(()), // 分离头状态不需要 pull
+            Ok(name) => name,
+            Err(_) => return Ok(()), // 分离头状态不需要 pull
         };
 
         // 获取上游分支信息
@@ -211,8 +211,8 @@ impl GitAccessor {
             .source_raw_err(AddrReason::data_error(), "")?
             .name()
         {
-            Some(name) => name.to_string(),
-            None => {
+            Ok(name) => name.to_string(),
+            Err(_) => {
                 return AddrReason::business_error()
                     .err_result()
                     .doing("无法获取分支名称");
@@ -264,9 +264,7 @@ impl GitAccessor {
             .doing("head")?
             .peel_to_commit()
             .source_raw_err(AddrReason::data_error(), "")?;
-        let mut index = repo
-            .index()
-            .source_raw_err(AddrReason::data_error(), "")?;
+        let mut index = repo.index().source_raw_err(AddrReason::data_error(), "")?;
         let tree_oid = index
             .write_tree()
             .source_raw_err(AddrReason::data_error(), "")?;
@@ -591,14 +589,11 @@ impl GitAccessor {
             self.checkout_branch(addr, repo, branch)
         } else {
             // 默认检出默认分支
-            let head = repo
-                .head()
-                .source_raw_err(AddrReason::data_error(), "")?;
-            let _name = head.name().ok_or_else(|| {
-                AddrReason::data_error()
-                    .to_err()
-                    .doing("无法获取 HEAD 名称")
-            })?;
+            let head = repo.head().source_raw_err(AddrReason::data_error(), "")?;
+            let _name = head
+                .name()
+                .source_raw_err(AddrReason::data_error(), "")
+                .doing("无法获取 HEAD 名称")?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
                 .source_raw_err(AddrReason::data_error(), "")?;
             Ok(())
@@ -646,11 +641,11 @@ impl GitAccessor {
         // 尝试查找本地分支
         if let Ok(b) = repo.find_branch(branch, BranchType::Local) {
             // 切换到本地分支
-            let refname = b.get().name().ok_or_else(|| {
-                AddrReason::business_error()
-                    .to_err()
-                    .doing("无效的分支名称")
-            })?;
+            let refname = b
+                .get()
+                .name()
+                .source_raw_err(AddrReason::business_error(), "")
+                .doing("无效的分支名称")?;
             repo.set_head(refname)
                 .source_raw_err(AddrReason::data_error(), "")?;
             repo.checkout_head(Some(&mut CheckoutBuilder::new().force()))
