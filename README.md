@@ -3,6 +3,8 @@
 [![CI](https://github.com/galaxio-labs/orion-accessor/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/galaxio-labs/orion-accessor/actions)
 [![Coverage Status](https://codecov.io/gh/galaxio-labs/orion-accessor/branch/main/graph/badge.svg)](https://codecov.io/gh/galaxio-labs/orion-accessor)
 [![crates.io](https://img.shields.io/crates/v/orion-accessor.svg)](https://crates.io/crates/orion-accessor)
+[![Downloads](https://img.shields.io/crates/d/orion-accessor.svg)](https://crates.io/crates/orion-accessor)
+[![Dependencies](https://deps.rs/repo/github/galaxio-labs/orion-accessor/status.svg)](https://deps.rs/repo/github/galaxio-labs/orion-accessor)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 一个Rust库，提供地址重定向、模板处理和变量扩展功能，专为现代开发工作流设计。
