@@ -1,7 +1,7 @@
 # Orion Accessor
 
 [![CI](https://github.com/galaxio-labs/orion-accessor/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/galaxio-labs/orion-accessor/actions)
-[![Coverage Status](https://codecov.io/gh/galaxio-labs/orion-accessor/branch/main/graph/badge.svg)](https://codecov.io/gh/galaxio-labs/orion-accessor)
+[![Coverage Status](https://coveralls.io/repos/github/galaxio-labs/orion-accessor/badge.svg?branch=main)](https://coveralls.io/github/galaxio-labs/orion-accessor?branch=main)
 [![crates.io](https://img.shields.io/crates/v/orion-accessor.svg)](https://crates.io/crates/orion-accessor)
 [![Downloads](https://img.shields.io/crates/d/orion-accessor.svg)](https://crates.io/crates/orion-accessor)
 [![Dependencies](https://deps.rs/repo/github/galaxio-labs/orion-accessor/status.svg)](https://deps.rs/repo/github/galaxio-labs/orion-accessor)
