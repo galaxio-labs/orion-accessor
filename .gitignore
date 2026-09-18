@@ -3,3 +3,4 @@ target
 .report
 temp
 tmp
+Cargo.lock
