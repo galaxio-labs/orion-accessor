@@ -51,6 +51,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      # Cargo.lock 不入库（crate 约定），audit-check 又写死了 --file ./Cargo.lock，
+      # 需要先在本 job 内解析出 lockfile。
+      - run: cargo generate-lockfile
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
