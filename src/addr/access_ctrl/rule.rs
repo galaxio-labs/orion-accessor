@@ -49,10 +49,10 @@ mod tests {
     #[test]
     fn test_rule2() {
         let rule = Rule::new(
-            "https://github.com/galaxy-sec/galaxy-flow*",
+            "https://github.com/galaxio-labs/galaxy-flow*",
             "https://gflow.com",
         );
-        let url = rule.replace("https://github.com/galaxy-sec/galaxy-flow/releases/download/v0.8.5/galaxy-flow-v0.8.5-aarch64-apple-darwin.tar.gz");
+        let url = rule.replace("https://github.com/galaxio-labs/galaxy-flow/releases/download/v0.8.5/galaxy-flow-v0.8.5-aarch64-apple-darwin.tar.gz");
         assert_eq!(url, Some("https://gflow.com/releases/download/v0.8.5/galaxy-flow-v0.8.5-aarch64-apple-darwin.tar.gz".to_string()));
     }
 

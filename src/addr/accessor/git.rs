@@ -726,7 +726,7 @@ mod tests {
         let dest_path = temp_dir.path().to_path_buf();
 
         // 使用一个小型测试仓库（这里使用 GitHub 上的一个测试仓库）
-        let git_addr = GitRepository::from("https://github.com/galaxy-sec/hello-word.git")
+        let git_addr = GitRepository::from("https://github.com/galaxio-labs/hello-word.git")
             .with_branch("master"); // 替换为实际测试分支
 
         let accessor = GitAccessor::default();
@@ -765,7 +765,7 @@ mod tests {
         }
         std::fs::create_dir_all(&dest_path).assert();
 
-        let git_addr = GitRepository::from("https://github.com/galaxy-sec/hello-word.git")
+        let git_addr = GitRepository::from("https://github.com/galaxio-labs/hello-word.git")
             .with_branch("main")
             .with_path("x86"); // 或使用 .tag("v1.0") 测试标签
 
@@ -790,8 +790,8 @@ mod tests {
         }
         std::fs::create_dir_all(&dest_path).assert();
 
-        let git_addr =
-            GitRepository::from("https://github.com/galaxy-sec/hello-word.git").with_branch("main");
+        let git_addr = GitRepository::from("https://github.com/galaxio-labs/hello-word.git")
+            .with_branch("main");
         // 执行克隆
         let accessor = GitAccessor::default();
         let git_up = accessor
@@ -817,8 +817,8 @@ mod tests {
         std::fs::create_dir_all(&dest_path).assert();
         let redirect = NetAccessCtrl::from_rule(
             Rule::new(
-                "https://github.com/galaxy-sec/hello-none*",
-                "https://github.com/galaxy-sec/hello-word",
+                "https://github.com/galaxio-labs/hello-none*",
+                "https://github.com/galaxio-labs/hello-word",
             ),
             Some(AuthConfig::new(
                 "generic-1747535977632",
@@ -827,8 +827,8 @@ mod tests {
             None,
         );
 
-        let git_addr =
-            GitRepository::from("https://github.com/galaxy-sec/hello-none.git").with_branch("main");
+        let git_addr = GitRepository::from("https://github.com/galaxio-labs/hello-none.git")
+            .with_branch("main");
         let accessor = GitAccessor::default().with_ctrl(Some(redirect));
         // 执行克隆
         //   let accessor = GitAccessor::default();
@@ -853,7 +853,7 @@ mod tests {
         }
 
         // 测试切换到非默认分支
-        let git_addr = GitRepository::from("https://github.com/galaxy-sec/hello-word.git")
+        let git_addr = GitRepository::from("https://github.com/galaxio-labs/hello-word.git")
             .with_branch("develop"); // 替换为实际测试分支
 
         let addr_type = Address::Git(git_addr.clone());
@@ -880,7 +880,7 @@ mod tests {
         std::fs::write(&file, "spec upload local dir to git repo.").assert();
 
         let git_addr =
-            GitRepository::from("git@github.com:galaxy-sec/spec_test.git").with_branch("main");
+            GitRepository::from("git@github.com:galaxio-labs/spec_test.git").with_branch("main");
 
         let addr_type = Address::Git(git_addr.clone());
         let accessor = GitAccessor::default();
@@ -900,7 +900,7 @@ mod tests {
         std::fs::write(&file, "spec upload local file to git repo.").assert();
 
         let git_addr =
-            GitRepository::from("git@github.com:galaxy-sec/spec_test.git").with_branch("main");
+            GitRepository::from("git@github.com:galaxio-labs/spec_test.git").with_branch("main");
 
         let addr_type = Address::Git(git_addr.clone());
         let accessor = GitAccessor::default();
@@ -1096,7 +1096,7 @@ mod tests {
             let result = invalid_accessor
                 .download_to_local(
                     &Address::Git(GitRepository::from(
-                        "https://github.com/galaxy-sec/hello-word.git",
+                        "https://github.com/galaxio-labs/hello-word.git",
                     )),
                     &readonly_path,
                     &DownloadOptions::default(),

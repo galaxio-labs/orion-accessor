@@ -170,7 +170,7 @@ mod tests {
             std::fs::remove_dir_all(&dest_path).assert();
         }
         let git_addr = Address::Git(GitRepository::from(
-            "https://github.com/galaxy-sec/hello-word.git",
+            "https://github.com/galaxio-labs/hello-word.git",
         ));
         accessor
             .download_to_local(

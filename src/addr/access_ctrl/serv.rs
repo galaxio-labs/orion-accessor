@@ -380,7 +380,7 @@ enable: false
         let service = NetAccessCtrl::new(
             vec![Unit::new(
                 vec![Rule::new(
-                    "https://github.com/galaxy-sec/galaxy-flow*",
+                    "https://github.com/galaxio-labs/galaxy-flow*",
                     "https://gflow.com",
                 )],
                 None,
@@ -388,7 +388,7 @@ enable: false
             )],
             true,
         );
-        let result = service.redirect("https://github.com/galaxy-sec/galaxy-flow");
+        let result = service.redirect("https://github.com/galaxio-labs/galaxy-flow");
         match result {
             RedirectResult::Direct(path, _) => {
                 assert_eq!(path, "https://gflow.com");

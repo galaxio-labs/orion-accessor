@@ -12,6 +12,11 @@
 
 - 新增 `LICENSE`（MIT，`Copyright (c) 2025 galaxio-labs`）。此前仓库缺少许可文件，但 `Cargo.toml` 已声明 `license = "MIT"`，README 末尾的 `[LICENSE](LICENSE)` 也是死链。
 
+### Fixed
+
+- 补齐 `git2` 的 `ssh` / `https` feature。`git2` 0.21 起 `default = []`（0.20 的默认值是 `["ssh", "https"]`），只声明 `vendored-openssl` 会让 libgit2 缺失 TLS 后端，HTTPS 克隆以 `there is no TLS stream available` 失败；现显式声明 `["ssh", "https", "vendored-openssl"]`，恢复与 0.20 一致的传输能力。此前该问题被本地 `~/.cache/galaxy` 的仓库缓存掩盖，仅在空缓存（CI）下暴露。
+- 测试夹具中的 `hello-word` / `spec_test` 仓库地址由 `galaxy-sec` 迁移至 `galaxio-labs`（GitHub 组织改名后旧地址返回 `Repository not found`）。
+
 ### Dependencies
 
 - `git2`: `0.20` → `0.21`

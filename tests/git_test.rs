@@ -42,7 +42,7 @@ fn test_git_proxy() {
     let _ = std::fs::remove_dir_all(&temp_dir); // 清理旧目录
 
     // 使用公共测试仓库
-    let test_repo = "https://github.com/galaxy-sec/hello-word.git";
+    let test_repo = "https://github.com/galaxio-labs/hello-word.git";
     let git_addr = GitRepository::from(test_repo);
 
     println!("测试仓库: {test_repo}");
