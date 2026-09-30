@@ -1,6 +1,6 @@
 use crate::{
     addr::{
-        AddrReason, AddrResult, Address, HttpResource, access_ctrl::serv::NetAccessCtrl,
+        AddrError, AddrReason, AddrResult, Address, HttpResource, access_ctrl::serv::NetAccessCtrl,
         accessor::client::create_http_client_by_ctrl, http::filename_of_url,
     },
     prelude::*,
@@ -22,6 +22,21 @@ use tokio_util::io::ReaderStream;
 use tracing::{debug, info, instrument};
 
 use crate::types::ResourceUploader;
+use std::time::Duration;
+use tracing::warn;
+
+/// 下载失败时的最大尝试次数（含首次）。
+const DOWNLOAD_MAX_ATTEMPTS: u32 = 3;
+/// 重试退避基数：第 n 次重试前等待 `DOWNLOAD_RETRY_BASE * 2^(n-1)`。
+const DOWNLOAD_RETRY_BASE: Duration = Duration::from_millis(300);
+
+/// 单次下载尝试的失败分类：区分「值得重试」与「重试无意义」。
+enum DownloadAttempt {
+    /// 网络抖动 / 5xx / 静默截断等，可重试。
+    Retryable(AddrError),
+    /// 4xx / 本地 IO 等确定性失败，重试无益。
+    Fatal(AddrError),
+}
 
 /// 进度追踪流包装器
 struct ProgressStream<R> {
@@ -228,8 +243,6 @@ impl HttpAccessor {
         dest_path: &Path,
         options: &DownloadOptions,
     ) -> AddrResult<PathBuf> {
-        use indicatif::{ProgressBar, ProgressStyle};
-        use tokio::io::AsyncWriteExt;
         let addr = if let Some(direct_serv) = &self.ctrl {
             direct_serv.direct_http_addr(addr.clone())
         } else {
@@ -244,47 +257,124 @@ impl HttpAccessor {
             );
             return Ok(dest_path.to_path_buf());
         }
-        if dest_path.exists() {
-            std::fs::remove_file(dest_path).source_raw_err(AddrReason::resource_error(), "")?;
-        }
         let mut ctx = OperationContext::doing("download url")
             .with_auto_log()
             .with_mod_path("addr/http");
         ctx.record("url", addr.url().as_str());
+
+        // 先下到**同目录**临时文件，成功后 rename 原子替换：
+        // 任何失败都不会在 `dest_path` 上留半包（也不会提前删掉已存在的旧文件），
+        // 因此 `reuse_cache` 跳过时不会把半包当成有效缓存。
+        let part_path = part_path(dest_path);
+        let mut last_err: Option<AddrError> = None;
+        for attempt in 1..=DOWNLOAD_MAX_ATTEMPTS {
+            remove_file_if_exists(&part_path);
+            match self
+                .download_once(&addr, dest_path, &part_path, &mut ctx)
+                .await
+            {
+                Ok(_) => {
+                    tokio::fs::rename(&part_path, dest_path)
+                        .await
+                        .source_raw_err(AddrReason::system_error(), "")
+                        .with_context(&ctx)?;
+                    debug!(
+                        target: "orion_variate::addr::http",
+                        path = %dest_path.display(),
+                        "download completed"
+                    );
+                    ctx.mark_suc();
+                    return Ok(dest_path.to_path_buf());
+                }
+                Err(DownloadAttempt::Fatal(e)) => {
+                    remove_file_if_exists(&part_path);
+                    return Err(e);
+                }
+                Err(DownloadAttempt::Retryable(e)) => {
+                    remove_file_if_exists(&part_path);
+                    if attempt < DOWNLOAD_MAX_ATTEMPTS {
+                        let backoff = DOWNLOAD_RETRY_BASE * 2u32.pow(attempt - 1);
+                        warn!(
+                            target: "orion_variate::addr::http",
+                            url = %addr.url(),
+                            attempt,
+                            max = DOWNLOAD_MAX_ATTEMPTS,
+                            backoff_ms = backoff.as_millis() as u64,
+                            error = %e,
+                            "download attempt failed; retrying"
+                        );
+                        tokio::time::sleep(backoff).await;
+                    }
+                    last_err = Some(e);
+                }
+            }
+        }
+        Err(AddrReason::RetryExhausted {
+            attempts: DOWNLOAD_MAX_ATTEMPTS,
+            last_error: last_err.map(|e| e.to_string()).unwrap_or_default(),
+        }
+        .to_err()
+        .doing(format!("download {}", addr.url()))
+        .with_context(&ctx))
+    }
+
+    /// 单次下载：请求 → 流式写入 `part_path` → 长度校验。
+    ///
+    /// 返回已下载字节数；失败按 [`DownloadAttempt`] 分类，调用方决定是否重试。
+    async fn download_once(
+        &self,
+        addr: &HttpResource,
+        dest_path: &Path,
+        part_path: &Path,
+        ctx: &mut OperationContext,
+    ) -> Result<u64, DownloadAttempt> {
+        use indicatif::{ProgressBar, ProgressStyle};
+        use tokio::io::AsyncWriteExt;
+
         let client =
-            create_http_client_by_ctrl(self.ctrl().clone().and_then(|x| x.direct_http_ctrl(&addr)))
-                .with_context(&ctx)?;
+            create_http_client_by_ctrl(self.ctrl().clone().and_then(|x| x.direct_http_ctrl(addr)))
+                .with_context(&*ctx)
+                .map_err(DownloadAttempt::Fatal)?;
         let mut request = client.get(addr.url());
         if let (Some(u), Some(p)) = (addr.username(), addr.password()) {
             request = request.basic_auth(u, Some(p));
         }
 
-        println!("downlaod from :{}", addr.url());
         let mut response = request
             .send()
             .await
             .source_raw_err(AddrReason::resource_error(), "")
-            .with_context(&ctx)?;
+            .with_context(&*ctx)
+            .map_err(DownloadAttempt::Retryable)?;
 
-        if !response.status().is_success() {
-            return Err(AddrReason::resource_error()
+        let status = response.status();
+        if !status.is_success() {
+            let err = AddrReason::resource_error()
                 .to_err()
-                .doing(format!("HTTP request failed: {}", response.status())))
-            .with_context(&ctx);
+                .doing(format!("HTTP request failed: {status}"))
+                .with_context(&*ctx);
+            // 4xx 是确定性失败（重试无意义）；5xx 可能是瞬时故障。
+            return Err(if status.is_client_error() {
+                DownloadAttempt::Fatal(err)
+            } else {
+                DownloadAttempt::Retryable(err)
+            });
         }
 
         let total_size = response.content_length().unwrap_or(0);
 
         ctx.record("local", dest_path.display().to_string());
-        let mut file = tokio::fs::File::create(&dest_path)
+        let mut file = tokio::fs::File::create(part_path)
             .await
             .source_raw_err(AddrReason::core_conf(), "")
-            .with_context(&ctx)?;
+            .with_context(&*ctx)
+            .map_err(DownloadAttempt::Fatal)?;
 
         // 创建进度条
         let pb = ProgressBar::new(total_size);
         pb.set_style(ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})").source_raw_err(AddrReason::logic_error(), "")?
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})").source_raw_err(AddrReason::logic_error(), "")
+            .map_err(DownloadAttempt::Fatal)?
             .progress_chars("#>-"));
 
         let mut downloaded: u64 = 0;
@@ -295,29 +385,66 @@ impl HttpAccessor {
             total_size = total_size,
             "starting download stream"
         );
-        while let Some(chunk) = response
-            .chunk()
-            .await
-            .source_raw_err(AddrReason::data_error(), "")
-            .with_context(&ctx)?
-        {
+        loop {
+            let chunk = response
+                .chunk()
+                .await
+                .source_raw_err(AddrReason::data_error(), "")
+                .with_context(&*ctx)
+                .map_err(DownloadAttempt::Retryable)?;
+            let Some(chunk) = chunk else { break };
             file.write_all(&chunk)
                 .await
                 .source_raw_err(AddrReason::system_error(), "")
-                .with_context(&ctx)?;
-
+                .with_context(&*ctx)
+                .map_err(DownloadAttempt::Fatal)?;
             downloaded += chunk.len() as u64;
             pb.set_position(downloaded);
         }
+        file.flush()
+            .await
+            .source_raw_err(AddrReason::system_error(), "")
+            .with_context(&*ctx)
+            .map_err(DownloadAttempt::Fatal)?;
+        drop(file);
+
+        // 长度校验：服务端给出了 total_size 时，收到的字节数必须完全一致，
+        // 否则视为截断（防服务端提前关连接被当成成功）。
+        if total_size > 0 && downloaded != total_size {
+            pb.abandon_with_message(format!("截断 {downloaded}/{total_size}"));
+            return Err(DownloadAttempt::Retryable(
+                AddrReason::data_error()
+                    .to_err()
+                    .doing(format!(
+                        "download truncated: {downloaded} of {total_size} bytes"
+                    ))
+                    .with_context(&*ctx),
+            ));
+        }
 
         pb.finish_with_message("下载完成");
-        debug!(
+        Ok(downloaded)
+    }
+}
+
+/// 下载临时文件路径：同目录下的 `<name>.part`（保证 rename 是同文件系统内的原子操作）。
+fn part_path(dest: &Path) -> PathBuf {
+    let mut name = dest.as_os_str().to_os_string();
+    name.push(".part");
+    PathBuf::from(name)
+}
+
+/// 尽力删除文件；不存在或删除失败都不报错（调用方只关心“别留半包”）。
+fn remove_file_if_exists(path: &Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => debug!(
             target: "orion_variate::addr::http",
-            path = %dest_path.display(),
-            "download completed"
-        );
-        ctx.mark_suc();
-        Ok(dest_path.to_path_buf())
+            path = %path.display(),
+            error = %e,
+            "failed to remove temp file"
+        ),
     }
 }
 
@@ -507,6 +634,158 @@ mod tests {
         http_accessor
             .download_to_local(&Address::from(addr), &path, &DownloadOptions::for_test())
             .await?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_part_path_appends_suffix_in_same_dir() {
+        let p = part_path(Path::new("/tmp/foo/bar.tar.gz"));
+        assert_eq!(p, PathBuf::from("/tmp/foo/bar.tar.gz.part"));
+        // 与目标同目录（保证 rename 是同文件系统内的原子操作）
+        assert_eq!(p.parent(), Some(Path::new("/tmp/foo")));
+    }
+
+    /// 服务端 5xx：应重试到上限，且**不在目标路径留半包**。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_retries_then_no_partial_left() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/retry.bin")
+            .with_status(503)
+            .expect(DOWNLOAD_MAX_ATTEMPTS as usize)
+            .create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("retry.bin");
+        let accessor = HttpAccessor::default();
+
+        let res = accessor
+            .download(
+                &HttpResource::from(format!("{}/retry.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await;
+
+        assert!(res.is_err(), "5xx should fail after retries");
+        assert!(!dest.exists(), "no partial file at dest");
+        assert!(!part_path(&dest).exists(), "no temp file left");
+        mock.assert(); // 恰好重试到上限
+        Ok(())
+    }
+
+    /// 下载失败时**不能删掉已存在的旧文件**（旧实现的 `remove_file` 会先删）。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_failure_keeps_existing_file() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server.mock("GET", "/keep.bin").with_status(500).create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("keep.bin");
+        std::fs::write(&dest, "old-content").source_raw_err(AddrReason::resource_error(), "")?;
+
+        let res = HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/keep.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await;
+
+        assert!(res.is_err());
+        assert_eq!(
+            std::fs::read_to_string(&dest).source_raw_err(AddrReason::resource_error(), "")?,
+            "old-content",
+            "existing file must be untouched on failure"
+        );
+        assert!(!part_path(&dest).exists());
+        Ok(())
+    }
+
+    /// 成功：写临时文件 → rename 替换；不留 `.part`。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_success_replaces_existing() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/fresh.bin")
+            .with_status(200)
+            .with_body("fresh-content")
+            .create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("fresh.bin");
+        std::fs::write(&dest, "old-content").source_raw_err(AddrReason::resource_error(), "")?;
+
+        let out = HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/fresh.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await?;
+
+        assert_eq!(out, dest);
+        assert_eq!(
+            std::fs::read_to_string(&dest).source_raw_err(AddrReason::resource_error(), "")?,
+            "fresh-content"
+        );
+        assert!(!part_path(&dest).exists(), "temp file must be gone");
+        mock.assert();
+        Ok(())
+    }
+
+    /// 声明长度与实际收到的字节不符（截断）必须报错。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_truncated_body_is_error() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/trunc.bin")
+            .with_status(200)
+            .with_header("content-length", "999999")
+            .with_body("short")
+            .create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("trunc.bin");
+
+        let res = HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/trunc.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await;
+
+        assert!(res.is_err(), "truncated body must be an error");
+        assert!(!dest.exists(), "no partial file at dest");
+        assert!(!part_path(&dest).exists());
+        Ok(())
+    }
+
+    /// `reuse_cache` 且目标已存在：直接跳过，不发请求。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_skips_when_reuse_cache() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server.mock("GET", "/cached.bin").expect(0).create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("cached.bin");
+        std::fs::write(&dest, "cached").source_raw_err(AddrReason::resource_error(), "")?;
+
+        let out = HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/cached.bin", server.url())),
+                &dest,
+                &DownloadOptions::default(), // reuse_cache = true
+            )
+            .await?;
+
+        assert_eq!(out, dest);
+        assert_eq!(
+            std::fs::read_to_string(&dest).source_raw_err(AddrReason::resource_error(), "")?,
+            "cached"
+        );
+        mock.assert(); // 未发起请求
         Ok(())
     }
 

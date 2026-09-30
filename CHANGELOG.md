@@ -1,3 +1,15 @@
+## [0.8.3] - 2026-09-30
+
+### Fixed
+
+- **`HttpAccessor::download` 中断后不再留半包**（#20）。改为先写同目录 `<name>.part`、成功后 `rename` 原子替换；失败时清掉临时文件，也不提前删除已存在的旧文件。此前直接写目标路径，断一次就永久失败（`reuse_cache` 把半包当成有效缓存跳过）。
+- 服务端给出 `Content-Length` 时校验实收字节数，防静默截断被当成成功。
+- 可重试失败（网络抖动 / 5xx / 截断）最多尝试 3 次、指数退避（300ms / 600ms）；4xx 与本地 IO 等确定性失败不重试；耗尽返回 `AddrReason::RetryExhausted`。
+
+### Changed
+
+- `download` 里的调试 `println!`（仅打印 URL）改为 tracing 日志。
+
 ## [0.8.2] - 2026-09-18
 
 ### Changed
