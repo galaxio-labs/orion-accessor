@@ -2,8 +2,8 @@
 
 ### Fixed
 
-- **`HttpAccessor::download` 中断后不再留半包**（#20）。改为先写同目录 `<name>.part`、成功后 `rename` 原子替换；失败时清掉临时文件，也不提前删除已存在的旧文件。此前直接写目标路径，断一次就永久失败（`reuse_cache` 把半包当成有效缓存跳过）。
-- 服务端给出 `Content-Length` 时校验实收字节数，防静默截断被当成成功。
+- **`HttpAccessor::download` 中断后不再留半包**（#20）。改为先写同目录 `<name>.part`、成功后 `rename` 原子替换（rename 失败也会清掉临时文件）；失败时清掉临时文件，也不提前删除已存在的旧文件。此前直接写目标路径，断一次就永久失败（`reuse_cache` 把半包当成有效缓存跳过）。
+- 服务端给出 `Content-Length` 时校验实收字节数（`Content-Length: 0` 同样校验），防静默截断被当成成功；`chunked` 等未知长度不校验。
 - 可重试失败（网络抖动 / 5xx / 截断）最多尝试 3 次、指数退避（300ms / 600ms）；4xx 与本地 IO 等确定性失败不重试；耗尽返回 `AddrReason::RetryExhausted`。
 
 ### Changed

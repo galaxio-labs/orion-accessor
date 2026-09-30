@@ -261,23 +261,32 @@ impl HttpAccessor {
             .with_auto_log()
             .with_mod_path("addr/http");
         ctx.record("url", addr.url().as_str());
+        ctx.record("local", dest_path.display().to_string());
 
         // 先下到**同目录**临时文件，成功后 rename 原子替换：
         // 任何失败都不会在 `dest_path` 上留半包（也不会提前删掉已存在的旧文件），
         // 因此 `reuse_cache` 跳过时不会把半包当成有效缓存。
+        //
+        // 注：`reuse_cache` 跳过时不再做任何校验；旧版本（< 0.8.3）遗留的截断文件
+        // 仍然会被当成有效缓存，需要手动删除（或改用 `UpdateScope::RemoteCache` 强刷）。
         let part_path = part_path(dest_path);
         let mut last_err: Option<AddrError> = None;
         for attempt in 1..=DOWNLOAD_MAX_ATTEMPTS {
             remove_file_if_exists(&part_path);
-            match self
-                .download_once(&addr, dest_path, &part_path, &mut ctx)
-                .await
-            {
+            match self.download_once(&addr, &part_path, &mut ctx).await {
                 Ok(_) => {
-                    tokio::fs::rename(&part_path, dest_path)
-                        .await
-                        .source_raw_err(AddrReason::system_error(), "")
-                        .with_context(&ctx)?;
+                    if let Err(e) = tokio::fs::rename(&part_path, dest_path).await {
+                        // rename 失败也别留临时文件；原始目标文件保持不变。
+                        remove_file_if_exists(&part_path);
+                        return Err(AddrReason::system_error()
+                            .to_err()
+                            .doing(format!(
+                                "rename {} -> {}: {e}",
+                                part_path.display(),
+                                dest_path.display()
+                            ))
+                            .with_context(&ctx));
+                    }
                     debug!(
                         target: "orion_variate::addr::http",
                         path = %dest_path.display(),
@@ -324,7 +333,6 @@ impl HttpAccessor {
     async fn download_once(
         &self,
         addr: &HttpResource,
-        dest_path: &Path,
         part_path: &Path,
         ctx: &mut OperationContext,
     ) -> Result<u64, DownloadAttempt> {
@@ -361,9 +369,9 @@ impl HttpAccessor {
             });
         }
 
-        let total_size = response.content_length().unwrap_or(0);
+        // `Content-Length` 缺失（如 chunked）时为 `None`，此时不做长度校验。
+        let total_size = response.content_length();
 
-        ctx.record("local", dest_path.display().to_string());
         let mut file = tokio::fs::File::create(part_path)
             .await
             .source_raw_err(AddrReason::core_conf(), "")
@@ -371,7 +379,7 @@ impl HttpAccessor {
             .map_err(DownloadAttempt::Fatal)?;
 
         // 创建进度条
-        let pb = ProgressBar::new(total_size);
+        let pb = ProgressBar::new(total_size.unwrap_or(0));
         pb.set_style(ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})").source_raw_err(AddrReason::logic_error(), "")
             .map_err(DownloadAttempt::Fatal)?
@@ -382,7 +390,7 @@ impl HttpAccessor {
         debug!(
             target: "orion_variate::addr::http",
             url = %addr.url(),
-            total_size = total_size,
+            total_size = ?total_size,
             "starting download stream"
         );
         loop {
@@ -408,16 +416,14 @@ impl HttpAccessor {
             .map_err(DownloadAttempt::Fatal)?;
         drop(file);
 
-        // 长度校验：服务端给出了 total_size 时，收到的字节数必须完全一致，
+        // 长度校验：服务端给出了 `Content-Length` 时，收到的字节数必须完全一致，
         // 否则视为截断（防服务端提前关连接被当成成功）。
-        if total_size > 0 && downloaded != total_size {
-            pb.abandon_with_message(format!("截断 {downloaded}/{total_size}"));
+        if let Some((got, want)) = length_mismatch(downloaded, total_size) {
+            pb.abandon_with_message(format!("截断 {got}/{want}"));
             return Err(DownloadAttempt::Retryable(
                 AddrReason::data_error()
                     .to_err()
-                    .doing(format!(
-                        "download truncated: {downloaded} of {total_size} bytes"
-                    ))
+                    .doing(format!("download truncated: {got} of {want} bytes"))
                     .with_context(&*ctx),
             ));
         }
@@ -432,6 +438,15 @@ fn part_path(dest: &Path) -> PathBuf {
     let mut name = dest.as_os_str().to_os_string();
     name.push(".part");
     PathBuf::from(name)
+}
+
+/// 长度校验：服务端给出 `total`（`Content-Length`）且与实收字节不一致时，
+/// 返回 `(实收, 应为)`；`total` 为 `None`（chunked 等未知长度）时不校验。
+fn length_mismatch(downloaded: u64, total: Option<u64>) -> Option<(u64, u64)> {
+    match total {
+        Some(n) if downloaded != n => Some((downloaded, n)),
+        _ => None,
+    }
 }
 
 /// 尽力删除文件；不存在或删除失败都不报错（调用方只关心“别留半包”）。
@@ -786,6 +801,204 @@ mod tests {
             "cached"
         );
         mock.assert(); // 未发起请求
+        Ok(())
+    }
+
+    #[test]
+    fn test_length_mismatch_matrix() {
+        // 一致 → 不报
+        assert_eq!(length_mismatch(9, Some(9)), None);
+        // 截断 / 超长 → 报（实收, 应为）
+        assert_eq!(length_mismatch(5, Some(9)), Some((5, 9)));
+        assert_eq!(length_mismatch(10, Some(9)), Some((10, 9)));
+        // 声明为 0 也是“已知长度”，必须恰好 0
+        assert_eq!(length_mismatch(0, Some(0)), None);
+        assert_eq!(length_mismatch(3, Some(0)), Some((3, 0)));
+        // 未知长度（chunked）不校验
+        assert_eq!(length_mismatch(0, None), None);
+        assert_eq!(length_mismatch(1234, None), None);
+    }
+
+    /// 4xx 是确定性失败：不重试（只发一次请求）。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_4xx_is_not_retried() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/missing.bin")
+            .with_status(404)
+            .expect(1)
+            .create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("missing.bin");
+
+        let res = HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/missing.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await;
+
+        assert!(res.is_err());
+        assert!(!dest.exists());
+        assert!(!part_path(&dest).exists());
+        mock.assert(); // 只请求一次
+        Ok(())
+    }
+
+    /// 重试耗尽后返回 `AddrReason::RetryExhausted`（保留尝试次数与最后一次错误）。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_exhaustion_reports_retry_reason() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server.mock("GET", "/down.bin").with_status(502).create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("down.bin");
+
+        let err = HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/down.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await
+            .expect_err("5xx should fail after retries");
+
+        match err.reason() {
+            AddrReason::RetryExhausted {
+                attempts,
+                last_error,
+            } => {
+                assert_eq!(*attempts, DOWNLOAD_MAX_ATTEMPTS);
+                assert!(!last_error.is_empty(), "last error should be recorded");
+            }
+            other => panic!("expected RetryExhausted, got {other:?}"),
+        }
+        assert!(!dest.exists());
+        assert!(!part_path(&dest).exists());
+        Ok(())
+    }
+
+    /// 无 `Content-Length`（chunked）：不校验长度，正常成功。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_chunked_body_is_ok() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/chunked.bin")
+            .with_status(200)
+            .with_chunked_body(|w| {
+                w.write_all(b"chunk-1")?;
+                w.write_all(b"chunk-2")?;
+                Ok(())
+            })
+            .create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("chunked.bin");
+
+        HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/chunked.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await?;
+
+        assert_eq!(
+            std::fs::read_to_string(&dest).source_raw_err(AddrReason::resource_error(), "")?,
+            "chunk-1chunk-2"
+        );
+        Ok(())
+    }
+
+    /// 空文件（`Content-Length: 0`）：合法，不算截断。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_empty_body_is_ok() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/empty.bin")
+            .with_status(200)
+            .with_body("")
+            .create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("empty.bin");
+
+        HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/empty.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await?;
+
+        assert_eq!(
+            std::fs::metadata(&dest)
+                .source_raw_err(AddrReason::resource_error(), "")?
+                .len(),
+            0
+        );
+        Ok(())
+    }
+
+    /// 本地 IO 失败（目标目录不存在）：不重试。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_io_error_is_not_retried() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/io.bin")
+            .with_status(200)
+            .with_body("x")
+            .expect(1)
+            .create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        // 父目录不存在 → 写临时文件失败
+        let dest = dir.path().join("no-such-dir").join("io.bin");
+
+        let res = HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/io.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await;
+
+        assert!(res.is_err());
+        assert!(!dest.exists());
+        mock.assert(); // 只请求一次（IO 错误不重试）
+        Ok(())
+    }
+
+    /// 上次中断遗留的 `.part` 会在下次下载时被清理，不影响结果。
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_http_download_cleans_stale_part_file() -> AddrResult<()> {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/resume.bin")
+            .with_status(200)
+            .with_body("good")
+            .create();
+
+        let dir = tempfile::tempdir().source_raw_err(AddrReason::resource_error(), "")?;
+        let dest = dir.path().join("resume.bin");
+        std::fs::write(part_path(&dest), "stale-half")
+            .source_raw_err(AddrReason::resource_error(), "")?;
+
+        HttpAccessor::default()
+            .download(
+                &HttpResource::from(format!("{}/resume.bin", server.url())),
+                &dest,
+                &DownloadOptions::for_test(),
+            )
+            .await?;
+
+        assert_eq!(
+            std::fs::read_to_string(&dest).source_raw_err(AddrReason::resource_error(), "")?,
+            "good"
+        );
+        assert!(!part_path(&dest).exists());
         Ok(())
     }
 
