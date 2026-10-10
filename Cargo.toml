@@ -11,7 +11,7 @@ repository = "https://github.com/galaxio-labs/orion-accessor"
 
 [dependencies]
 orion-error = { version = "0.9", features = ["derive", "serde"] }
-orion_conf =  { version = "0.7", features = ["yaml"]}
+orion_conf =  { version = "0.8", features = ["yaml"]}
 #orion-variate = "~0.10"
 orion-variate = "0.14"
  #orion_conf = "~0.1"
