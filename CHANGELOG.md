@@ -1,3 +1,10 @@
+## [0.9.0] - 2026-10-10
+
+### Changed
+
+- `orion-error` from `0.8` to `0.9`（操作日志拆分为纯数据 `OperationContext` 与非 `Clone` 的 `AutoLogGuard`；附上下文 / 克隆不再重复或延迟日志）。`with_auto_log()` 现返回 `AutoLogGuard`，现有 `with_context(&ctx)` / `mark_suc()` 等调用经 `Deref` / `DerefMut` 保持可用。
+- `orion-variate` from `0.13` to `0.14`、`orion-infra` from `0.7` to `0.8`（对齐 `orion-error 0.9`，避免同一依赖图出现两份 `orion-error`）。
+
 ## [0.8.3] - 2026-09-30
 
 ### Fixed
